@@ -4,7 +4,7 @@ import torch
 import os
 import pracmln
 import numpy as np
-
+from torch_random_variable import RandomVariable
 
 class MRFDataset(torch.utils.data.Dataset):
     """A dataset for a Markov Random Field (MRF).
@@ -44,6 +44,8 @@ class MRFDataset(torch.utils.data.Dataset):
             database = pracmln.Database.load(mln, path + ":" + database)
 
         all_clusters = []
+    
+        random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!=cluster_domain]
 
         #get all predicates that are not dependent on a cluster
         unaffected_predicates = [pred for pred in mln.predicates if cluster_domain not in pred.argdoms]
@@ -75,7 +77,33 @@ class MRFDataset(torch.utils.data.Dataset):
 
                 all_clusters.append(related_atoms)
 
-        self.samples = all_clusters
+        #construct unified db for utilities
+        unified_db = database[0].union(database[1:], mln)
+
+        #get all domain elementss
+        all_domain_elements = []
+        [all_domain_elements.extend(e) for e in unified_db.domains.values()]
+
+        #get all now unique atoms
+        all_atoms = []
+        for cluster in all_clusters:
+            for atom in cluster:
+                if atom not in all_atoms:
+                    all_atoms.append(atom)
+        
+        all_atoms.sort(key=lambda x: str(x))
+
+        #construct feature_matrix
+        feature_matrix = np.zeros((len(all_clusters), len(all_atoms)))
+
+
+        #fill feature matrix
+        for idx, cluster in enumerate(all_clusters):
+            for jdx, atom in enumerate(all_atoms):
+                feature_matrix[idx, jdx] = int(atom in cluster)
+
+
+        self.samples = feature_matrix
         
 
     def __len__(self):
