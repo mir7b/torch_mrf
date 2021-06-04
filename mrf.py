@@ -3,17 +3,34 @@ import torch.nn as nn
 import mrf_dataset
 import os
 import pracmln
+import collections
+import itertools
+from itertools import chain, combinations
+
+def powerset(iterable):
+    "powerset([1,2,3]) --> () (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
+
 class MarkovRandomField(nn.Module):
     def __init__(self, mln, cliques):
         """Constructs a Markov Random Field from the nodes and edges."""
-        self.nodes = nodes
-        self.edges = edges
+        self.mln = mln
+        self.cliques = cliques
 
-        self.potential_functions = []
+        self._create_universe()
 
-    def plot(self):
-        pass
-    
+    def _create_universe(self):
+
+        #sort domains and domain values for determinism reasons
+        self.sorted_domains = dict()
+        for key, value in sorted(self.mln.domains.items()):
+            self.sorted_domains[key] = sorted(value)
+        
+        universe = torch.zeros(size=())
+        for domain, values in self.sorted_domains.items():
+            ps = list(powerset(values))        
+            print(ps)
 
 def main():
 
@@ -28,12 +45,7 @@ def main():
 
     dataloader = torch.utils.data.DataLoader(dataset)
 
-    print(mln.domains)
-
-
-    mrf = MarkovRandomField(["Burglary", "Earthquake", "Alarm", "John Calls", "Mary Calls"],
-                            [("Burglary", "Earthquake"), ("Burglary", "Alarm"), ("Alarm", "Earthquake"), 
-                             ("John Calls", "Alarm"), ("Mary Calls", "Alarm")])
+    mrf = MarkovRandomField(mln, [["person", "domNeighborhood", "place"]])
 
 
 if __name__ == "__main__":
