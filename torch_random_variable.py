@@ -29,3 +29,9 @@ class RandomVariable(object):
         encoding =  torch.zeros(size=(len(self.domain),), dtype=torch.bool)
         encoding[self.domain.index(value)] = True
         return encoding
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __str__(self):
+        return "Torch Random Variable " + self.name + " with domain " + str(self.domain)

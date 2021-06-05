@@ -44,8 +44,14 @@ class MRFDataset(torch.utils.data.Dataset):
             database = pracmln.Database.load(mln, path + ":" + database)
 
         all_clusters = []
-    
+
         random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!=cluster_domain]
+        random_variables.sort(key=lambda variable: variable.name)
+
+        for  in self.database:
+
+
+        exit()
 
         #get all predicates that are not dependent on a cluster
         unaffected_predicates = [pred for pred in mln.predicates if cluster_domain not in pred.argdoms]

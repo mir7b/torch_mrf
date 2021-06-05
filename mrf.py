@@ -89,9 +89,9 @@ def main():
     mln = pracmln.MLN.load(path + ":" + mln_name)
     database = pracmln.Database.load(mln, path + ":" + db_name)
 
-    mrf = MarkovRandomField(mln.domains, [["person", "domNeighborhood", "place"]])
     dataset = mrf_dataset.MRFDataset(mln=mln, database=database)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64)
+    mrf = MarkovRandomField(mln.domains, [["domNeighborhood", "place"]])
     
     for batch in dataloader:
         mrf.forward(batch)
