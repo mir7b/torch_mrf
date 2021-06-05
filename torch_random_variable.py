@@ -7,7 +7,7 @@ class RandomVariable(object):
     
     Attributes:
         name (str): The name of the variable
-        domain (list<str>): The domain of this variable
+        domain (list<str>): The domain of this variable sorted lexical
     """
     def __init__(self, name, domain):
         """Construct a random variable with a name and possible values.

@@ -1,3 +1,4 @@
+from numpy.core.fromnumeric import prod
 import torch
 import torch.nn as nn
 import mrf_dataset
@@ -16,68 +17,50 @@ class MarkovRandomField(nn.Module):
         self.random_variables = random_variables
         self.random_variables.sort(key=lambda x: x.name)
 
+        for idx, clique in enumerate(cliques):
+            for jdx, partner in enumerate(clique):
+                if isinstance(partner, str):
+                    cliques[idx][jdx] = RandomVariable(name=partner, domain = [var.domain for var  in self.random_variables if var.name ==partner][0])
+
         #sort the cliques
         [clique.sort(key=lambda x: x.name) for clique in cliques]
         self.cliques = cliques
 
-        # self._create_clique_universes()
-        # self._initialize_weights()
+        self._create_clique_universes()
+        self._initialize_weights()
 
     def _create_clique_universes(self):
-
-        self.clique_horizons = dict()
+        """Create the universe for every clique as an indicator matrix.
+        
+        Every clique gets a universe matrix with the shape (num_worlds, num_features).
+        This ensures that you can check for satasfied variables by multiplying.
+        """
         self.clique_universes = dict()
 
-        #this part creates the horizon of all cliques in a readable way.
-        #for all cliques
         for clique in self.cliques:
+            domains = [m.domain for m in clique]
+            universe = itertools.product(*domains)
 
-            #create a horizon
-            horizon = []
+            domain_lengths = [len(domain) for domain in domains]
+            univserse_matrix_shape = (prod(domain_lengths), sum(domain_lengths))
+            universe_matrix = torch.zeros(size=univserse_matrix_shape, dtype=torch.bool)
 
-            #for every random variable that is part of this clique
-            for domain in clique:
-                grounded_domain = []
-
-                #ground the variable by all possible values
-                for value in self.domains[domain]:
-                    grounded_domain.append((domain,value))
-
-                #add the grounding to the universe
-                horizon.append(grounded_domain)
-
-            #save the universe of this clique for runtime reduction
-            self.clique_horizons[frozenset(clique)] = horizon
-
-        #this part creates the universe of all cliques as indicator funtion way (which is hard to interpret)
-        for clique, horionz in self.clique_horizons.items():
-
-            #calculate the shape of the universe matrix which is (num_worlds x num_features)
-            domain_lengths = torch.tensor([len(h) for h in horionz])
-            num_features = torch.sum(domain_lengths)
-            num_worlds = torch.prod(domain_lengths)
-
-            #create matrix to hold universes
-            universe_matrix = torch.zeros(size=(num_worlds,num_features), dtype=torch.bool)
-
-            #create all possible universe
-            universe = list(itertools.product(*horizon))
-
-            #extract the features from every world and write them into the universe matrix
             for idx, world in enumerate(universe):
-                for jdx, feature in enumerate([item for sublist in horizon for item in sublist]):
-                    universe_matrix[idx,jdx] = feature in world
+                for jdx, feature in enumerate(world):
+                    universe_matrix[idx, sum(domain_lengths[:jdx]):sum(domain_lengths[:jdx+1])] = clique[jdx].encode(feature)
             
-            self.clique_universes[clique] = universe_matrix
+            self.clique_universes[frozenset(clique)] = universe_matrix
+            
 
     def _initialize_weights(self):
-        """Initialize the weights for each world of each clique"""
+        """Initialize the weights for each world of each clique from a unifrom distribution with bounds of (0,1)."""
         self.clique_weights = dict()
         for clique, universe_matrix in self.clique_universes.items():
             self.clique_weights[clique] = torch.rand(size=(universe_matrix.shape[0],), 
                                                      dtype=torch.double, requires_grad=True)
 
     def forward(self, samples):
+        print(self.clique_universes)
         print(samples)
         
 
@@ -91,7 +74,11 @@ def main():
 
     dataset = mrf_dataset.MRFDataset(mln=mln, database=database)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64)
-    mrf = MarkovRandomField(mln.domains, [["domNeighborhood", "place"]])
+
+
+
+    random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!="?p"]
+    mrf = MarkovRandomField(random_variables, [["domNeighborhood", "place"]])
     
     for batch in dataloader:
         mrf.forward(batch)

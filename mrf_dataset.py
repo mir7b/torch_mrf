@@ -45,14 +45,6 @@ class MRFDataset(torch.utils.data.Dataset):
 
         all_clusters = []
 
-        random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!=cluster_domain]
-        random_variables.sort(key=lambda variable: variable.name)
-
-        for  in self.database:
-
-
-        exit()
-
         #get all predicates that are not dependent on a cluster
         unaffected_predicates = [pred for pred in mln.predicates if cluster_domain not in pred.argdoms]
         unaffected_prednames = [pred.name for pred in unaffected_predicates]
@@ -83,7 +75,8 @@ class MRFDataset(torch.utils.data.Dataset):
 
                 all_clusters.append(related_atoms)
 
-        #construct unified db for utilities
+
+        # #construct unified db for utilities
         unified_db = database[0].union(database[1:], mln)
 
         #get all domain elementss
