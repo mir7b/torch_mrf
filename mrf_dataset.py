@@ -1,5 +1,6 @@
 """This module holds implementations of Datasets which can be used for MRFs."""
 
+from itertools import product
 import torch
 import os
 import pracmln
@@ -18,7 +19,7 @@ class MRFDataset(torch.utils.data.Dataset):
 
     def __init__(self, path=os.path.join("..","pracmln","examples","alarm", "alarm.pracmln"),
                  mln="alarm-kreator.mln", database="query1.db", cluster_domain="person",
-                 placeholder="?p"):
+                 placeholder="?p", random_variables=None):
         """Initialize an MRFDataset.
 
         Loads a database as an iteratable PyTorch dataset. The databases are preprocessed s. t.
@@ -42,6 +43,12 @@ class MRFDataset(torch.utils.data.Dataset):
 
         if isinstance(database, str):
             database = pracmln.Database.load(mln, path + ":" + database)
+
+        # construct unified db for utilities
+        unified_db = database[0].union(database[1:], mln)
+
+        self.random_variables = random_variables
+        self.placeholder = placeholder
 
         all_clusters = []
 
@@ -75,35 +82,28 @@ class MRFDataset(torch.utils.data.Dataset):
 
                 all_clusters.append(related_atoms)
 
-
-        # #construct unified db for utilities
-        unified_db = database[0].union(database[1:], mln)
-
-        #get all domain elementss
-        all_domain_elements = []
-        [all_domain_elements.extend(e) for e in unified_db.domains.values()]
-
-        #get all now unique atoms
-        all_atoms = []
-        for cluster in all_clusters:
-            for atom in cluster:
-                if atom not in all_atoms:
-                    all_atoms.append(atom)
-        
-        all_atoms.sort(key=lambda x: str(x))
-
-        #construct feature_matrix
-        feature_matrix = np.zeros((len(all_clusters), len(all_atoms)))
-
-
-        #fill feature matrix
+        domain_lengths = [len(var.domain) for var in self.random_variables]
+        num_features = sum(domain_lengths)
+        self.samples = torch.zeros(size=(len(all_clusters),num_features), dtype=torch.bool)
         for idx, cluster in enumerate(all_clusters):
-            for jdx, atom in enumerate(all_atoms):
-                feature_matrix[idx, jdx] = int(atom in cluster)
-
-
-        self.samples = feature_matrix
+            self.samples[idx] = self.encode_cluster(cluster)
+            
         
+    def encode_cluster(self, cluster):
+        domain_lengths = [len(var.domain) for var in self.random_variables]
+        num_features = sum(domain_lengths)
+        encoded = torch.zeros(size=(num_features,), dtype=torch.bool)
+
+        for idx, var in enumerate(self.random_variables):
+            for atom in cluster:
+                value = [arg for arg in atom.args if arg!=self.placeholder]
+                if len(value) > 0:
+                    value, = value
+                    if value in var.domain:
+                        encoded[sum(domain_lengths[:idx]):sum(domain_lengths[:idx+1])] = var.encode(value)    
+            
+        return encoded
+
 
     def __len__(self):
         """Return the number of samples in this dataset.

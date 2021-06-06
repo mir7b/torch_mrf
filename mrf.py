@@ -59,7 +59,14 @@ class MarkovRandomField(nn.Module):
             self.clique_weights[clique] = torch.rand(size=(universe_matrix.shape[0],), 
                                                      dtype=torch.double, requires_grad=True)
 
+    def _calc_z(self):
+        self.Z=torch.tensor(1, dtype=torch.double)
+        for _, weights in self.clique_weights.items():
+            self.Z = self.Z * torch.prod(weights)
+        print(self.Z)
+
     def forward(self, samples):
+        self._calc_z()
         print(self.clique_universes)
         print(samples)
         
@@ -72,13 +79,13 @@ def main():
     mln = pracmln.MLN.load(path + ":" + mln_name)
     database = pracmln.Database.load(mln, path + ":" + db_name)
 
-    dataset = mrf_dataset.MRFDataset(mln=mln, database=database)
+    random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!="person"]
+
+    mrf = MarkovRandomField(random_variables, [["domNeighborhood", "place"]])
+
+    dataset = mrf_dataset.MRFDataset(mln=mln, database=database, random_variables=random_variables)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64)
 
-
-
-    random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!="?p"]
-    mrf = MarkovRandomField(random_variables, [["domNeighborhood", "place"]])
     
     for batch in dataloader:
         mrf.forward(batch)
