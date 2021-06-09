@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 import mrf_dataset
 import os
 import pracmln
@@ -7,16 +9,21 @@ from torch_random_variable import RandomVariable
 import mrf_utils
 import tqdm
 import frozenlist
+import pytorch_lightning as pl
+
 
 class MarkovRandomField(nn.Module):
-    def __init__(self, random_variables, cliques, device="cuda", verbose=True):
+    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = 1024,verbose=True):
         """Constructs a Markov Random Field from the nodes and edges."""
+
+        super(MarkovRandomField, self).__init__()
 
         #sort random variables
         self.random_variables = random_variables
         self.random_variables.sort(key=lambda x: x.name)
         self.verbose = verbose
         self.device = device
+        self.max_parallel_worlds = max_parallel_worlds
 
         for idx, clique in enumerate(cliques):
             for jdx, partner in enumerate(clique):
@@ -52,10 +59,11 @@ class MarkovRandomField(nn.Module):
 
     def _initialize_weights(self):
         """Initialize the weights for each world of each clique from a unifrom distribution with bounds of (0,1)."""
-        self.clique_weights = dict()
+        self.clique_weights = nn.ParameterDict()
         for clique, universe_matrix in self.clique_universes.items():
-            self.clique_weights[clique] = torch.rand(size=(universe_matrix.shape[0],), 
-                                                     dtype=torch.double, requires_grad=True, device=self.device)
+            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.rand(size=(universe_matrix.shape[0],), 
+                                                     dtype=torch.double, device=self.device))
+            #self.register_parameter(str(clique), self.clique_weights[clique])
 
 
     def _get_rows_in_universe(self, random_variables):
@@ -91,7 +99,7 @@ class MarkovRandomField(nn.Module):
 
         #reset Z to 0
         self.Z=torch.tensor(0, dtype=torch.double, device=self.device)
-        
+
         #for every world in the universe
         for world in tqdm.tqdm(self.universe_matrix, desc="Calculate overall probability mass") if self.verbose else self.universe_matrix:
             
@@ -112,7 +120,7 @@ class MarkovRandomField(nn.Module):
                 collapsed = mrf_utils.collapse_sideways(fitting_worlds)
                 
                 #calculate weights for the worlds that are satasfied
-                clique_weight = torch.sum(collapsed * self.clique_weights[clique])
+                clique_weight = torch.sum(collapsed * self.clique_weights[str(clique)])
                 
                 #multiply the world probability mass
                 world_probability_mass = world_probability_mass * clique_weight
@@ -133,7 +141,7 @@ class MarkovRandomField(nn.Module):
                 fitting_worlds = torch.repeat_interleave(clique_universe.unsqueeze(1), b, 1) == clique_features
                 collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
 
-                clique_weights = collapsed * torch.repeat_interleave(self.clique_weights[clique].unsqueeze(1), b, 1)
+                clique_weights = collapsed * torch.repeat_interleave(self.clique_weights[str(clique)].unsqueeze(1), b, 1)
 
                 clique_weights = torch.sum(clique_weights, dim=-2)
                 
@@ -153,14 +161,27 @@ def main():
 
     random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!="person"]
 
-    mrf = MarkovRandomField(random_variables, [["domNeighborhood", "place"]])
+    mrf = MarkovRandomField(random_variables, [["domNeighborhood"],["place"]])
 
     dataset = mrf_dataset.MRFDataset(mln=mln, database=database, random_variables=random_variables)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=64)
 
-    
-    for batch in dataloader:
-        preds = mrf.forward(batch.to(mrf.device))
-        print(preds)
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(mrf.parameters(), lr=0.1)
+
+    for _ in tqdm.tqdm(range(5000), desc="Training mrf"):
+        for batch in dataloader:
+            preds = mrf.forward(batch.to(mrf.device))
+
+            loss = criterion(preds, torch.ones(size=preds.shape, dtype = torch.double, device = preds.get_device()))
+            loss.backward(retain_graph=True)
+            
+            optimizer.step()
+            optimizer.zero_grad()
+
+            
+
+    print(list(mrf.parameters()))  
+
 if __name__ == "__main__":
     main()
