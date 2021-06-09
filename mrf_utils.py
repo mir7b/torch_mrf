@@ -16,8 +16,10 @@ def create_universe_matrix(random_variables, verbose=True):
     domains = [variable.domain for variable in random_variables]
     universe = itertools.product(*domains)
 
-    domain_lengths = torch.tensor([len(domain) for domain in domains])
+    domain_lengths = torch.tensor([var.domain_length for var in random_variables])
+
     univserse_matrix_shape = (torch.prod(domain_lengths), torch.sum(domain_lengths))
+
     universe_matrix = torch.zeros(size=univserse_matrix_shape, dtype=torch.bool)
     
     for idx, world in tqdm.tqdm(enumerate(universe), total = len(universe_matrix), desc="Grounding Universe") if verbose else enumerate(universe):
@@ -27,11 +29,11 @@ def create_universe_matrix(random_variables, verbose=True):
     return universe_matrix
 
 
-def collapse_sideways(tensor):
-    result = torch.ones(size=(tensor.shape[0],), dtype=torch.bool, device=tensor.get_device())
-    for column in tensor.T:
-        result *= column
-    return result
+# def collapse_sideways(tensor):
+#     result = torch.ones(size=(tensor.shape[0],), dtype=torch.bool, device=tensor.get_device())
+#     for column in tensor.T:
+#         result *= column
+#     return result
 
 def batch_collapse_sideways(tensor):
     """Let a tensor with shape (w, b, k) collaps to shape (w, b) by multiplying the k dimension into each other.
@@ -47,7 +49,7 @@ def batch_collapse_sideways(tensor):
     """
     #num worlds, num batches, dim per world is the input tensors shape
     w, b, k = tensor.shape
-    result = torch.ones(size=(w,b), dtype=torch.bool, device=tensor.get_device())
+    result = torch.ones(size=(w,b), dtype=torch.bool, device=tensor.device)
     for k in range(k):
         column = tensor[:,:,k]
         result *= column
