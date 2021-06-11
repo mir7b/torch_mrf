@@ -17,7 +17,7 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=0.1)
     
 
-    pbar = tqdm.tqdm(range(1000), desc="Training mrf")
+    pbar = tqdm.tqdm(range(100), desc="Training mrf")
     for _ in pbar:
         for batch in dataloader:
             preds = model(batch.to(model.device))
@@ -28,10 +28,12 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
             
-            model._clip_weights()
-            model._calc_z()
+            model.clip_weights()
+            model.calc_z()
 
             pbar.set_postfix(train_loss=loss.item())
-    
+
+    model.predict([dict(Alarm=True, JohnCalls=True)])
+
 if __name__ == '__main__':
     main()

@@ -1,3 +1,4 @@
+from collections import defaultdict
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -66,10 +67,27 @@ class MarkovRandomField(nn.Module):
 
         #sort the cliques
         self.cliques = [sorted(clique, key=lambda x: x.name) for clique in cliques]
+        self.cliques = [frozenlist.FrozenList(clique) for clique in self.cliques]
+        for clique in self.cliques:
+            clique.freeze()
 
         self._create_clique_universes()
         self._initialize_weights()
-        self._calc_z()
+        self._init_rows_in_univserse()
+        self.calc_z()
+
+
+    def _init_rows_in_univserse(self):
+        """Initialize the indices of the rows of every clique and random variable in the universe matrix."""
+        self.random_variable_row_in_univserse = dict()
+        self.clique_rows_in_univserse = dict()
+        
+        for random_variable in self.random_variables:
+            self.random_variable_row_in_univserse[random_variable] = self._get_rows_in_universe([random_variable])
+        
+        for clique in self.cliques:
+            self.clique_rows_in_univserse[clique] = self._get_rows_in_universe(clique)
+
 
     def _create_clique_universes(self):
         """Create the universe for every clique as an indicator matrix.
@@ -83,13 +101,13 @@ class MarkovRandomField(nn.Module):
         for clique in tqdm.tqdm(self.cliques, desc="Grounding Cliques") if self.verbose else self.cliques:
 
             #cannot use frozen set here because iterating over frozen sets is somehow not deterministic
-            key = frozenlist.FrozenList(clique)
-            key.freeze()
-            self.clique_universes[key] = mrf_utils.create_universe_matrix(clique).to(self.device)
+            # key = frozenlist.FrozenList(clique)
+            # key.freeze()
+            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
 
         self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables)
         
-    def _clip_weights(self):
+    def clip_weights(self):
         """Clip the weights of the Markov Random Field such that they are greater or equal to 0."""
 
         for clique, weights in self.clique_weights.items():
@@ -132,7 +150,7 @@ class MarkovRandomField(nn.Module):
 
         return rows
 
-    def _calc_z(self):
+    def calc_z(self):
         """Calculate the probability mass of this mrf with respect to the current weights.
         
         """
@@ -153,6 +171,51 @@ class MarkovRandomField(nn.Module):
         self.Z = new_Z
 
 
+    def predict(self, samples):
+        """Returns the probability of each sample in the input. The samples can be partial worlds.
+        
+        Args:
+            samples (iterable<dict<torch_random_variable.RandomVariable, str>>): The batch of (partial) worlds
+                Can also be a dict that mapes the variable name to its value.
+
+        Returns:
+            probabilities (torch.Tensor<torch.double>): Tensor of probabilites with same length as samples.
+
+        """
+        
+        #vector to store all probabilites
+        probabilities = torch.zeros((len(samples),), dtype=torch.double, device=self.device)
+
+        for idx, sample in enumerate(samples):
+            #get the features
+            rows = None
+            values = None
+            for variable, value in sample.items():
+                if isinstance(variable,str):
+                    variable, = [var for var in self.random_variables if var.name==variable]
+
+                if rows is None:
+                    rows = self.random_variable_row_in_univserse[variable]
+                else:
+                    rows = torch.cat((rows, self.random_variable_row_in_univserse[variable]))
+
+                if values is None:
+                    values = variable.encode(value)
+                else:
+                    values = torch.cat((values, variable.encode(value)))
+            
+            worlds = torch.where(self.universe_matrix[:,rows] == values, 1, 0).bool().to(self.device)
+            satasfied_worlds = mrf_utils.batch_collapse_sideways(worlds.unsqueeze(1)).squeeze()
+ 
+            satasfied_worlds_indices = satasfied_worlds * torch.tensor(range(1,len(self.universe_matrix)+1), dtype=torch.long, device=self.device)
+            
+            satasfied_worlds_indices = satasfied_worlds_indices[satasfied_worlds_indices.nonzero(as_tuple=True)] -1
+            probability = torch.sum(self(self.universe_matrix[satasfied_worlds_indices].to(self.device)))
+            probabilities[idx] = probability
+        
+        return probabilities
+
+
     def forward(self, samples):
         """Get the probabilities of a batch of worlds. The batch has to have the shape (num_samples, num_world_features).
         
@@ -165,7 +228,7 @@ class MarkovRandomField(nn.Module):
         world_probability_masses = torch.ones(size=(b,), dtype=torch.double, device=self.device)
 
         for clique, clique_universe in self.clique_universes.items():
-                rows = self._get_rows_in_universe(clique)
+                rows = self.clique_rows_in_univserse[clique]
 
                 clique_features = samples[:,rows]
 
@@ -211,8 +274,8 @@ def main():
             optimizer.step()
             optimizer.zero_grad()
             
-            mrf._clip_weights()
-            mrf._calc_z()
+            mrf.clip_weights()
+            mrf.calc_z()
 
             pbar.set_postfix(train_loss=loss.item())
     
