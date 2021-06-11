@@ -95,9 +95,9 @@ class MarkovRandomField(nn.Module):
         #for every clique ground the universe
         for clique in tqdm.tqdm(self.cliques, desc="Grounding Cliques") if self.verbose else self.cliques:
 
-            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
+            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique, verbose=False).to(self.device)
 
-        self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables)
+        self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables, verbose=self.verbose)
         
 
     def clip_weights(self):
