@@ -1,6 +1,9 @@
+"""Utility functions for markov random fields that maybe needed outside of mrfs."""
+
 import torch
 import itertools
 import tqdm
+import torch_random_variable
 
 def create_universe_matrix(random_variables, verbose=True):
     """Calculate the universe of a set of random variables.
@@ -12,14 +15,14 @@ def create_universe_matrix(random_variables, verbose=True):
         universe_matrix (torch.Tensor<torch.bool>): A matrix that contains all valid combinations of the input
 
     """
-    
     domains = [variable.domain for variable in random_variables]
     universe = itertools.product(*domains)
+    binaray_variables = [var for var in random_variables if isinstance(var, torch_random_variable.BinaryRandomVariable)]
 
     domain_lengths = torch.tensor([var.domain_length for var in random_variables])
 
-    univserse_matrix_shape = (torch.prod(domain_lengths), torch.sum(domain_lengths))
-
+    #here the binary random variables reduced encdoing space needs to be considered
+    univserse_matrix_shape = (torch.prod(domain_lengths) * pow(2,len(binaray_variables)), torch.sum(domain_lengths))
     universe_matrix = torch.zeros(size=univserse_matrix_shape, dtype=torch.bool)
     
     for idx, world in tqdm.tqdm(enumerate(universe), total = len(universe_matrix), desc="Grounding Universe") if verbose else enumerate(universe):
@@ -27,13 +30,6 @@ def create_universe_matrix(random_variables, verbose=True):
             universe_matrix[idx, torch.sum(domain_lengths[:jdx]):torch.sum(domain_lengths[:jdx+1])] = random_variables[jdx].encode(feature)
     
     return universe_matrix
-
-
-# def collapse_sideways(tensor):
-#     result = torch.ones(size=(tensor.shape[0],), dtype=torch.bool, device=tensor.get_device())
-#     for column in tensor.T:
-#         result *= column
-#     return result
 
 def batch_collapse_sideways(tensor):
     """Let a tensor with shape (w, b, k) collaps to shape (w, b) by multiplying the k dimension into each other.

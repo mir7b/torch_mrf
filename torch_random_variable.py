@@ -9,7 +9,9 @@ class RandomVariable(object):
         name (str): The name of the variable
         domain (list<str>): The domain of this variable sorted lexical
         domain_length (int): The length of the domain
+
     """
+
     def __init__(self, name, domain, domain_length=None):
         """Construct a random variable with a name and possible values.
         
@@ -50,12 +52,29 @@ class RandomVariable(object):
 
 
 class BinaryRandomVariable(RandomVariable):
-    """A binary random variable which benefits from only half the encoding space required as a
-       Random Variable with a domain of [True,False]"""
-
+    """A binary random variable.
+    
+    It benefits from only half the encoding space required as Random Variable with a domain of [True,False]
+    """
 
     def __init__(self, name):
-        super(BinaryRandomVariable, self).__init__(name, [True, False], domain_length=2)
+        """Construct a binary variable from a name.
+        
+        Args:
+            name (str): The name of the variable
+        """
+        super(BinaryRandomVariable, self).__init__(name, [True, False], domain_length=1)
+
+    def encode(self,value):
+        """Encode the value into the variable domain.
+        
+        Args:
+            value(bool): Rather if the variable is True of False
+        
+        Returns:
+            encoding (torch.Tensor<torch.bool>): The encoded value
+        """
+        return torch.tensor(value, dtype=torch.bool)
 
     def __str__(self):
         return "Torch Binary Random Variable " + self.name

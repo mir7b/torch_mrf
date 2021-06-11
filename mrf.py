@@ -1,21 +1,16 @@
-from collections import defaultdict
+"""This file describes vecotrized Markov Random Fields for the GPU."""
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
-import mrf_dataset
-import os
-import pracmln
 from torch_random_variable import RandomVariable
 import mrf_utils
 import tqdm
 import frozenlist
-import pytorch_lightning as pl
 
 
 class MarkovRandomField(nn.Module):
-    """
-    Represents a Markov Random Field (MRF) from a set of random variables and cliques.
+    """Represents a Markov Random Field (MRF) from a set of random variables and cliques.
+    
     The MRF is highly vectorized and can be used for partial queries.
 
     Attributes:
@@ -38,8 +33,8 @@ class MarkovRandomField(nn.Module):
     """
 
     def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = 1024,verbose=True):
-        """Constructs a Markov Random Field from the nodes and edges.
-        
+        """Construct a Markov Random Field from the nodes and edges.
+
         Args:
             random_variables (iterable<torch_random_variable.RandomVariable>): The random variables that are represented
                 in this Markov Random Field
@@ -49,8 +44,8 @@ class MarkovRandomField(nn.Module):
             max_parallel_worlds (int): The maximum number of worlds that are evaluated at once on the graphics card.
                 This parameter can produce an Cuda Out of Memory Error when picked too large and slow down speed when picked too small.
             verbose (bool): Whether to show progression bars or not
-        """
 
+        """
         super(MarkovRandomField, self).__init__()
 
         #sort random variables
@@ -60,12 +55,13 @@ class MarkovRandomField(nn.Module):
         self.device = device
         self.max_parallel_worlds = max_parallel_worlds
 
+        #parse clique members to variable if they arent already variables
         for idx, clique in enumerate(cliques):
             for jdx, partner in enumerate(clique):
                 if isinstance(partner, str):
-                    cliques[idx][jdx] = RandomVariable(name=partner, domain = [var.domain for var  in self.random_variables if var.name ==partner][0])
+                    cliques[idx][jdx], = [var for var in self.random_variables if var.name==partner]
 
-        #sort the cliques
+        #sort the cliques and convert them to hashable datatypes
         self.cliques = [sorted(clique, key=lambda x: x.name) for clique in cliques]
         self.cliques = [frozenlist.FrozenList(clique) for clique in self.cliques]
         for clique in self.cliques:
@@ -100,26 +96,24 @@ class MarkovRandomField(nn.Module):
         #for every clique ground the universe
         for clique in tqdm.tqdm(self.cliques, desc="Grounding Cliques") if self.verbose else self.cliques:
 
-            #cannot use frozen set here because iterating over frozen sets is somehow not deterministic
-            # key = frozenlist.FrozenList(clique)
-            # key.freeze()
             self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
 
         self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables)
         
+
     def clip_weights(self):
         """Clip the weights of the Markov Random Field such that they are greater or equal to 0."""
-
         for clique, weights in self.clique_weights.items():
             self.clique_weights[clique].data = F.relu(weights)
+
 
     def _initialize_weights(self):
         """Initialize the weights for each world of each clique from a unifrom distribution with bounds of (0,1)."""
         self.clique_weights = nn.ParameterDict()
         for clique, universe_matrix in self.clique_universes.items():
+            #have to use the string representation here because parameter dicts only allow strings as keys
             self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.rand(size=(universe_matrix.shape[0],), 
                                                      dtype=torch.double, device=self.device))
-            #self.register_parameter(str(clique), self.clique_weights[clique])
 
 
     def _get_rows_in_universe(self, random_variables):
@@ -132,7 +126,6 @@ class MarkovRandomField(nn.Module):
         Returns:
             rows (torch.Tenosr<torch.long>): A tensor that contains the slices of the variables.
         """
-
         world_domain_lengths = torch.tensor([variable.domain_length for variable in self.random_variables])
         
         local_domain_lengths = torch.tensor([variable.domain_length for variable in random_variables])
@@ -151,12 +144,14 @@ class MarkovRandomField(nn.Module):
         return rows
 
     def calc_z(self):
-        """Calculate the probability mass of this mrf with respect to the current weights.
-        
-        """
+        """Calculate the probability mass of this mrf with respect to the current weights."""
+        #reset Z to 1 for the forward calculations
         self.Z = torch.tensor(1, dtype=torch.double, device=self.device)
 
+        #initialize new Z
         new_Z = torch.tensor(0, dtype=torch.double, device=self.device)
+        
+        #get batches of universe
         num_batches = int(len(self.universe_matrix) / self.max_parallel_worlds) + 1
         
         for i in range(num_batches):
@@ -166,13 +161,15 @@ class MarkovRandomField(nn.Module):
             #calc their probability mass
             probabilities = self(worlds)
 
+            #add up the new overall probability mass
             new_Z += torch.sum(probabilities)
 
+        #set it as class variable
         self.Z = new_Z
 
 
     def predict(self, samples):
-        """Returns the probability of each sample in the input. The samples can be partial worlds.
+        """Return the probability of each sample in the input. The samples can be partial worlds.
         
         Args:
             samples (iterable<dict<torch_random_variable.RandomVariable, str>>): The batch of (partial) worlds
@@ -182,7 +179,6 @@ class MarkovRandomField(nn.Module):
             probabilities (torch.Tensor<torch.double>): Tensor of probabilites with same length as samples.
 
         """
-        
         #vector to store all probabilites
         probabilities = torch.zeros((len(samples),), dtype=torch.double, device=self.device)
 
@@ -199,10 +195,15 @@ class MarkovRandomField(nn.Module):
                 else:
                     rows = torch.cat((rows, self.random_variable_row_in_univserse[variable]))
 
+                #if it is a binary variable dont use True or False, use [True] or [False] instead
+                encoded = variable.encode(value)
+                if len(encoded.shape) == 0:
+                    encoded = encoded.unsqueeze(0)
+
                 if values is None:
-                    values = variable.encode(value)
+                    values = encoded
                 else:
-                    values = torch.cat((values, variable.encode(value)))
+                    values = torch.cat((values, encoded))
             
             worlds = torch.where(self.universe_matrix[:,rows] == values, 1, 0).bool().to(self.device)
             satasfied_worlds = mrf_utils.batch_collapse_sideways(worlds.unsqueeze(1)).squeeze()
@@ -224,65 +225,33 @@ class MarkovRandomField(nn.Module):
 
         Returns probabilities (tensor<double>): A tensor with the probability of each sample.
         """
+        #get batch and world dimension
         b, k = samples.shape
+
+        #construct result probability masses
         world_probability_masses = torch.ones(size=(b,), dtype=torch.double, device=self.device)
 
+        #for every clique
         for clique, clique_universe in self.clique_universes.items():
+
+                #get the rows of the clique in the universe
                 rows = self.clique_rows_in_univserse[clique]
 
+                #get the clique features of each world
                 clique_features = samples[:,rows]
 
+                #collapse the worlds where the clique feature holds
                 fitting_worlds = torch.repeat_interleave(clique_universe.unsqueeze(1), b, 1) == clique_features
                 collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
 
+                #get the weight of each holding clique
                 clique_weights = collapsed * torch.repeat_interleave(self.clique_weights[str(clique)].unsqueeze(1), b, 1)
 
+                #sum up the weights
                 clique_weights = torch.sum(clique_weights, dim=-2)
                 
+                #multiply with the weight of each previous clique
                 world_probability_mass = world_probability_masses * clique_weights
         
+        #scale by the overall probability mass
         return world_probability_mass / self.Z
-
-
-def main():
-
-    path=os.path.join("..","pracmln","examples","alarm", "alarm.pracmln")
-    mln_name="alarm-kreator.mln"
-    db_name="query1.db"
-    mln = pracmln.MLN.load(path + ":" + mln_name)
-    database = pracmln.Database.load(mln, path + ":" + db_name)
-
-    random_variables = [RandomVariable(name,domain) for name, domain in mln.domains.items() if name!="person"]
-
-    mrf = MarkovRandomField(random_variables, [["domNeighborhood"],["place"]], device="cuda")
-
-    dataset = mrf_dataset.MRFDataset(mln=mln, database=database, random_variables=random_variables)
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=64)
-
-    criterion = nn.BCELoss()
-    optimizer = optim.SGD(mrf.parameters(), lr=0.1)
-    
-
-    pbar = tqdm.tqdm(range(1000), desc="Training mrf")
-    for _ in pbar:
-        for batch in dataloader:
-            preds = mrf.forward(batch.to(mrf.device))
-
-            loss = criterion(preds, torch.ones(size=preds.shape, dtype = torch.double, device = preds.device))
-            loss.backward(retain_graph=True)
-            
-            optimizer.step()
-            optimizer.zero_grad()
-            
-            mrf.clip_weights()
-            mrf.calc_z()
-
-            pbar.set_postfix(train_loss=loss.item())
-    
-    print(preds)
-    print(list(mrf.parameters()))  
-    
-    
-
-if __name__ == "__main__":
-    main()

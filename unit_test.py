@@ -8,10 +8,10 @@ def main():
     dataset = alarm_dataset.AlarmDataset(10000)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10000)
     
-    # model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
-    #         cliques=[["Burglary", "Alarm", "Earthquake"], ["Alarm", "JohnCalls"], ["Alarm", "MaryCalls"]])
     model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
-            cliques=[["Burglary", "Alarm", "Earthquake","JohnCalls", "MaryCalls"]])
+            cliques=[["Burglary", "Alarm", "Earthquake"], ["Alarm", "JohnCalls"], ["Alarm", "MaryCalls"]])
+    # model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
+    #         cliques=[["Burglary", "Alarm", "Earthquake","JohnCalls", "MaryCalls"]])
 
     criterion = nn.BCELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.1)
