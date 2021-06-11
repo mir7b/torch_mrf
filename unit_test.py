@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import tqdm
+
 def main():
     dataset = alarm_dataset.AlarmDataset(10000)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10000)
@@ -33,7 +34,9 @@ def main():
 
             pbar.set_postfix(train_loss=loss.item())
 
-    model.predict([dict(Alarm=True, JohnCalls=True)])
+    partial_prediction = model.predict([dict(Alarm=True, JohnCalls=True, MaryCalls=True)])
+    print(list(model.parameters()))
+    print(partial_prediction)
 
 if __name__ == '__main__':
     main()

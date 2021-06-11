@@ -2,7 +2,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_random_variable import RandomVariable
 import mrf_utils
 import tqdm
 import frozenlist

@@ -63,7 +63,7 @@ class BinaryRandomVariable(RandomVariable):
         Args:
             name (str): The name of the variable
         """
-        super(BinaryRandomVariable, self).__init__(name, [True, False], domain_length=1)
+        super(BinaryRandomVariable, self).__init__(name, [False, True], domain_length=1)
 
     def encode(self,value):
         """Encode the value into the variable domain.
