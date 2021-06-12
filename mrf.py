@@ -125,17 +125,17 @@ class MarkovRandomField(nn.Module):
         Returns:
             rows (torch.Tenosr<torch.long>): A tensor that contains the slices of the variables.
         """
-        world_domain_lengths = torch.tensor([variable.domain_length for variable in self.random_variables])
+        world_encoding_lengths = torch.tensor([variable.encoding_length for variable in self.random_variables])
         
-        local_domain_lengths = torch.tensor([variable.domain_length for variable in random_variables])
+        local_encoding_lengths = torch.tensor([variable.encoding_length for variable in random_variables])
 
-        rows = torch.zeros(size=(torch.sum(local_domain_lengths),), dtype=torch.long)
+        rows = torch.zeros(size=(torch.sum(local_encoding_lengths),), dtype=torch.long)
         row_idx = 0
 
         for idx, variable in enumerate(random_variables):
             pos = self.random_variables.index(variable)
-            begin = torch.sum(world_domain_lengths[:pos])
-            end = torch.sum(world_domain_lengths[:pos+1])
+            begin = torch.sum(world_encoding_lengths[:pos])
+            end = torch.sum(world_encoding_lengths[:pos+1])
             for value in range(begin, end):
                 rows[row_idx] = value
                 row_idx += 1

@@ -17,17 +17,16 @@ def create_universe_matrix(random_variables, verbose=True):
     """
     domains = [variable.domain for variable in random_variables]
     universe = itertools.product(*domains)
-    binaray_variables = [var for var in random_variables if isinstance(var, torch_random_variable.BinaryRandomVariable)]
-
+    
     domain_lengths = torch.tensor([var.domain_length for var in random_variables])
+    encoding_lengths = torch.tensor([var.encoding_length for var in random_variables])
 
-    #here the binary random variables reduced encdoing space needs to be considered
-    univserse_matrix_shape = (torch.prod(domain_lengths) * pow(2,len(binaray_variables)), torch.sum(domain_lengths))
+    univserse_matrix_shape = (torch.prod(domain_lengths), torch.sum(encoding_lengths))
     universe_matrix = torch.zeros(size=univserse_matrix_shape, dtype=torch.bool)
     
     for idx, world in tqdm.tqdm(enumerate(universe), total = len(universe_matrix), desc="Grounding Universe") if verbose else enumerate(universe):
         for jdx, feature in enumerate(world):
-            universe_matrix[idx, torch.sum(domain_lengths[:jdx]):torch.sum(domain_lengths[:jdx+1])] = random_variables[jdx].encode(feature)
+            universe_matrix[idx, torch.sum(encoding_lengths[:jdx]):torch.sum(encoding_lengths[:jdx+1])] = random_variables[jdx].encode(feature)
     
     return universe_matrix
 

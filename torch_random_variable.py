@@ -9,21 +9,24 @@ class RandomVariable(object):
         name (str): The name of the variable
         domain (list<str>): The domain of this variable sorted lexical
         domain_length (int): The length of the domain
+        encoding_size (int): The size of the encoding
 
     """
 
-    def __init__(self, name, domain, domain_length=None):
+    def __init__(self, name, domain, domain_length=None, encoding_length=None):
         """Construct a random variable with a name and possible values.
         
         Args:
             name (str): The name of the variable
             domain (list<str>): The domain of this variable
             domain_length (int): The length of the domain
+            encoding_size (int): The size of the encoding
 
         """
         self.name = name
         self.domain = sorted(domain)
         self.domain_length = len(domain) if domain_length is None else domain_length
+        self.encoding_length = encoding_length if encoding_length else domain_length
 
     def encode(self, value):
         """Encode the value of the variable as one hot encoded tensor.
@@ -63,7 +66,7 @@ class BinaryRandomVariable(RandomVariable):
         Args:
             name (str): The name of the variable
         """
-        super(BinaryRandomVariable, self).__init__(name, [False, True], domain_length=1)
+        super(BinaryRandomVariable, self).__init__(name, [False, True], domain_length=2, encoding_length=1)
 
     def encode(self,value):
         """Encode the value into the variable domain.
