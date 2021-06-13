@@ -1,4 +1,5 @@
 """This file describes vecotrized Markov Random Fields for the GPU."""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
