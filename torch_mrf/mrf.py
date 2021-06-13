@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import mrf_utils
+from torch_mrf import mrf_utils
 import tqdm
 import frozenlist
 

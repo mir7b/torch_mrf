@@ -1,15 +1,15 @@
-import mrf
-import alarm_dataset
+import torch_mrf.mrf
+import torch_mrf.alarm_dataset
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import tqdm
 
 def main():
-    dataset = alarm_dataset.AlarmDataset(100)
+    dataset = torch_mrf.alarm_dataset.AlarmDataset(100)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10000)
     
-    model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
+    model = torch_mrf.mrf.MarkovRandomField(dataset.random_variables, device="cuda",
             cliques=[["Burglary", "Alarm", "Earthquake"], ["Alarm", "JohnCalls"], ["Alarm", "MaryCalls"]])
     # model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
     #         cliques=[["Burglary", "Alarm", "Earthquake","JohnCalls", "MaryCalls"]])
