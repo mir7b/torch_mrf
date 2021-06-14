@@ -6,7 +6,7 @@ import torch.optim as optim
 import tqdm
 
 def main():
-    dataset = torch_mrf.alarm_dataset.AlarmDataset(100)
+    dataset = torch_mrf.alarm_dataset.AlarmDataset(10000)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10000)
     
     model = torch_mrf.mrf.MarkovRandomField(dataset.random_variables, device="cuda",
