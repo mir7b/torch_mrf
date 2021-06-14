@@ -49,3 +49,7 @@ def batch_collapse_sideways(tensor):
         result *= column
         
     return result
+
+def binary(x, bits):
+    mask = 2**torch.arange(bits).to(x.device, x.dtype)
+    return x.unsqueeze(-1).bitwise_and(mask).ne(0).byte()

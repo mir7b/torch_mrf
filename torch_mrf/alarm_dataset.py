@@ -1,7 +1,7 @@
 """This module holds implementations of Datasets which can be used for MRFs."""
 
 import torch
-from torch_mrf.torch_random_variable import BinaryRandomVariable
+from torch_mrf.torch_random_variable import BinaryRandomVariable, RandomVariable
 
 class AlarmDataset(torch.utils.data.Dataset):
     """A dataset for a Markov Random Field (MRF) with which the mrf can be tested and debugged.
@@ -19,14 +19,14 @@ class AlarmDataset(torch.utils.data.Dataset):
 
         super(AlarmDataset, self).__init__()
         self.random_variables = []
-        self.random_variables.append(BinaryRandomVariable(name="Burglary"))
+        self.random_variables.append(RandomVariable(name="Burglary", domain=[True, False]))
         self.random_variables.append(BinaryRandomVariable(name="Earthquake"))
         self.random_variables.append(BinaryRandomVariable(name="Alarm"))
         self.random_variables.append(BinaryRandomVariable(name="MaryCalls"))
         self.random_variables.append(BinaryRandomVariable(name="JohnCalls"))
         self.random_variables.sort(key=lambda x: x.name)
 
-        self.samples = torch.randint(low=0, high=2, size=(1000,len(self.random_variables))).bool()
+        self.samples = torch.randint(low=0, high=2, size=(num_samples,len(self.random_variables))).bool()
 
     def __len__(self):
         """Return the number of samples in this dataset.

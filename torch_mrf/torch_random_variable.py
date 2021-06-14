@@ -1,7 +1,7 @@
 """This module holds definitions for easy to use random variables."""
 
 import torch
-
+from torch_mrf.mrf_utils import binary
 class RandomVariable(object):
     """A random variable which can only be 1 value at a time.
     
@@ -26,7 +26,8 @@ class RandomVariable(object):
         self.name = name
         self.domain = sorted(domain)
         self.domain_length = len(domain) if domain_length is None else domain_length
-        self.encoding_length = encoding_length if encoding_length else domain_length
+        self.encoding_length = encoding_length if encoding_length else torch.ceil(torch.log2(torch.tensor(self.domain_length))).long().item()
+        print(self.encoding_length)
 
     def encode(self, value):
         """Encode the value of the variable as one hot encoded tensor.
@@ -34,9 +35,7 @@ class RandomVariable(object):
         Returns:
             encoding (torch.tensor<torch.bool>): The encoding of the value in its domain
         """
-        encoding =  torch.zeros(size=(self.domain_length,), dtype=torch.bool)
-        encoding[self.domain.index(value)] = True
-        return encoding
+        return binary(torch.tensor(self.domain.index(value)),torch.tensor(self.encoding_length))
 
     def __repr__(self) -> str:
         return str(self)
