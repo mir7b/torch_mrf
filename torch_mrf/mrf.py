@@ -32,7 +32,7 @@ class MarkovRandomField(nn.Module):
         
     """
 
-    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = 1024,verbose=True):
+    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = pow(2,20),verbose=True):
         """Construct a Markov Random Field from the nodes and edges.
 
         Args:
@@ -96,7 +96,7 @@ class MarkovRandomField(nn.Module):
         #for every clique ground the universe
         for clique in tqdm.tqdm(self.cliques, desc="Grounding Cliques") if self.verbose else self.cliques:
 
-            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique, verbose=False).to(self.device)
+            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
 
         self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables, verbose=self.verbose)
         
@@ -154,7 +154,7 @@ class MarkovRandomField(nn.Module):
         #get batches of universe
         num_batches = int(len(self.universe_matrix) / self.max_parallel_worlds) + 1
         
-        for i in range(num_batches):
+        for i in tqdm.tqdm(range(num_batches),desc="Calculating Z") if self.verbose else range(num_batches):
             #get max_parallele_worlds amount of worlds from the universe
             worlds = self.universe_matrix[i*self.max_parallel_worlds : (i+1) * self.max_parallel_worlds].to(self.device)
 

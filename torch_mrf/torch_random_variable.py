@@ -32,7 +32,7 @@ class RandomVariable(object):
         Returns:
             encoding (torch.tensor<torch.bool>): The encoding of the value in its domain
         """
-        return binary(torch.tensor(self.domain.index(value)),torch.tensor(self.encoding_length))
+        return binary(torch.tensor(self.domain.index(value)),torch.tensor(self.encoding_length)).bool()
 
     def __repr__(self) -> str:
         return str(self)
@@ -63,17 +63,6 @@ class BinaryRandomVariable(RandomVariable):
             name (str): The name of the variable
         """
         super(BinaryRandomVariable, self).__init__(name, [False, True])
-
-    def encode(self,value):
-        """Encode the value into the variable domain.
-        
-        Args:
-            value(bool): Rather if the variable is True of False
-        
-        Returns:
-            encoding (torch.Tensor<torch.bool>): The encoded value
-        """
-        return torch.tensor(value, dtype=torch.bool)
 
     def __str__(self):
         return "Torch Binary Random Variable " + self.name

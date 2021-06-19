@@ -4,29 +4,29 @@ import torch
 import itertools
 import tqdm
 
-def create_universe_matrix(random_variables, verbose=True):
+def create_universe_matrix(random_variables, verbose=False):
     """Calculate the universe of a set of random variables.
 
     Args:
         random_variables (iterable<torch_random_variable.RandomVariable>): The iterable of random variables 
-    
+        verbose (bool): Rather to print a tqdm loading bar or not.
     Returns:
         universe_matrix (torch.Tensor<torch.bool>): A matrix that contains all valid combinations of the input
 
     """
-    domains = [variable.domain for variable in random_variables]
-    universe = itertools.product(*domains)
-    
+    #create all combinations of worlds
+    domains = [torch.tensor(range(var.domain_length)) for var in random_variables]
+    universe = torch.cartesian_prod(*domains)
+
+    #calc shape for universe matrix and create it
     domain_lengths = torch.tensor([var.domain_length for var in random_variables])
     encoding_lengths = torch.tensor([var.encoding_length for var in random_variables])
-
     univserse_matrix_shape = (torch.prod(domain_lengths), torch.sum(encoding_lengths))
     universe_matrix = torch.zeros(size=univserse_matrix_shape, dtype=torch.bool)
-    
-    for idx, world in tqdm.tqdm(enumerate(universe), total = len(universe_matrix), desc="Grounding Universe") if verbose else enumerate(universe):
-        for jdx, feature in enumerate(world):
-            universe_matrix[idx, torch.sum(encoding_lengths[:jdx]):torch.sum(encoding_lengths[:jdx+1])] = random_variables[jdx].encode(feature)
-    
+
+    for idx, column in enumerate(tqdm.tqdm(universe.T, desc="Grounding Universe")) if verbose else enumerate(universe.T):
+        universe_matrix[:, torch.sum(encoding_lengths[:idx]):torch.sum(encoding_lengths[:idx+1])] = binary(column, random_variables[idx].encoding_length)
+
     return universe_matrix
 
 def batch_collapse_sideways(tensor):
