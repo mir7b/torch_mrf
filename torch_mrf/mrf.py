@@ -98,6 +98,10 @@ class MarkovRandomField(nn.Module):
 
             self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
 
+        # calculate the universe_matrix semi sequential because it is likely to not fit at once.
+        #calc shape for universe matrix and create it
+        domain_lengths = torch.tensor([var.domain_length for var in self.random_variables])
+        encoding_lengths = torch.tensor([var.encoding_length for var in self.random_variables])
         self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables, verbose=self.verbose)
         
 

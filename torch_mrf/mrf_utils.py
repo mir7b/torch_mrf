@@ -29,6 +29,8 @@ def create_universe_matrix(random_variables, verbose=False):
 
     return universe_matrix
 
+
+
 def batch_collapse_sideways(tensor):
     """Let a tensor with shape (w, b, k) collaps to shape (w, b) by multiplying the k dimension into each other.
     
