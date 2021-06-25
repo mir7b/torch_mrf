@@ -9,7 +9,7 @@ def main():
     dataset = torch_mrf.alarm_dataset.AlarmDataset(10000)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=10000)
     
-    model = torch_mrf.mrf.MarkovRandomField(dataset.random_variables, device="cuda",
+    model = torch_mrf.mrf.MarkovRandomField(dataset.random_variables, device="cuda", max_parallel_worlds=pow(2,16),
             cliques=[["Burglary", "Alarm", "Earthquake"], ["Alarm", "JohnCalls"], ["Alarm", "MaryCalls"]])
     # model = mrf.MarkovRandomField(dataset.random_variables, device="cuda",
     #         cliques=[["Burglary", "Alarm", "Earthquake","JohnCalls", "MaryCalls"]])
@@ -34,7 +34,7 @@ def main():
 
             pbar.set_postfix(train_loss=loss.item())
 
-    partial_prediction = model.predict([dict(Alarm=True, Burglary=True)])
+    partial_prediction = model.predict([dict(Alarm=True, Burglary=True, Earthquake=True)])
     print(list(model.parameters()))
     print(partial_prediction)
 

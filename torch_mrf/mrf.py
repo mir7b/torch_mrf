@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_mrf import mrf_utils
 import tqdm
+import math
 import frozenlist
 
 
@@ -67,7 +68,7 @@ class MarkovRandomField(nn.Module):
         for clique in self.cliques:
             clique.freeze()
 
-        self._create_clique_universes()
+
         self._initialize_weights()
         self._init_rows_in_univserse()
         self.calc_z()
@@ -83,26 +84,6 @@ class MarkovRandomField(nn.Module):
         
         for clique in self.cliques:
             self.clique_rows_in_univserse[clique] = self._get_rows_in_universe(clique)
-
-
-    def _create_clique_universes(self):
-        """Create the universe for every clique as an indicator matrix.
-        
-        Every clique gets a universe matrix with the shape (num_worlds, num_features).
-        This ensures that you can check for satasfied variables by multiplying.
-        """
-        self.clique_universes = dict()
-        
-        #for every clique ground the universe
-        for clique in tqdm.tqdm(self.cliques, desc="Grounding Cliques") if self.verbose else self.cliques:
-
-            self.clique_universes[clique] = mrf_utils.create_universe_matrix(clique).to(self.device)
-
-        # calculate the universe_matrix semi sequential because it is likely to not fit at once.
-        #calc shape for universe matrix and create it
-        domain_lengths = torch.tensor([var.domain_length for var in self.random_variables])
-        encoding_lengths = torch.tensor([var.encoding_length for var in self.random_variables])
-        self.universe_matrix = mrf_utils.create_universe_matrix(self.random_variables, verbose=self.verbose)
         
 
     def clip_weights(self):
@@ -114,11 +95,12 @@ class MarkovRandomField(nn.Module):
     def _initialize_weights(self):
         """Initialize the weights for each world of each clique from a unifrom distribution with bounds of (0,1)."""
         self.clique_weights = nn.ParameterDict()
-        for clique, universe_matrix in self.clique_universes.items():
+        for clique in self.cliques:
+            num_worlds = torch.prod(torch.tensor([var.domain_length for var in clique]))
             #have to use the string representation here because parameter dicts only allow strings as keys
-            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.rand(size=(universe_matrix.shape[0],), 
+            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.rand(size=(num_worlds,), 
                                                      dtype=torch.double, device=self.device))
-
+            
 
     def _get_rows_in_universe(self, random_variables):
         """Get the row indices of the random_variables in the universe.
@@ -137,7 +119,7 @@ class MarkovRandomField(nn.Module):
         rows = torch.zeros(size=(torch.sum(local_encoding_lengths),), dtype=torch.long)
         row_idx = 0
 
-        for idx, variable in enumerate(random_variables):
+        for variable in random_variables:
             pos = self.random_variables.index(variable)
             begin = torch.sum(world_encoding_lengths[:pos])
             end = torch.sum(world_encoding_lengths[:pos+1])
@@ -149,28 +131,27 @@ class MarkovRandomField(nn.Module):
 
     def calc_z(self):
         """Calculate the probability mass of this mrf with respect to the current weights."""
+        
         #reset Z to 1 for the forward calculations
-        self.Z = torch.tensor(1, dtype=torch.double, device=self.device)
+        self.Z = torch.tensor(1, dtype=torch.double, device=self.device, requires_grad=False)
 
         #initialize new Z
         new_Z = torch.tensor(0, dtype=torch.double, device=self.device)
-        
-        #get batches of universe
-        num_batches = int(len(self.universe_matrix) / self.max_parallel_worlds) + 1
-        
-        for i in tqdm.tqdm(range(num_batches),desc="Calculating Z") if self.verbose else range(num_batches):
-            #get max_parallele_worlds amount of worlds from the universe
-            worlds = self.universe_matrix[i*self.max_parallel_worlds : (i+1) * self.max_parallel_worlds].to(self.device)
 
+        #iterate over world batches
+        for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=self.max_parallel_worlds, verbose=self.verbose):
+            
+            world_batch = world_batch.to(self.device)
+            
             #calc their probability mass
-            probabilities = self(worlds)
+            probabilities = self(world_batch)
 
             #add up the new overall probability mass
             new_Z += torch.sum(probabilities)
-
+            
         #set it as class variable
         self.Z = new_Z
-
+        
 
     def predict(self, samples):
         """Return the probability of each sample in the input. The samples can be partial worlds.
@@ -209,17 +190,26 @@ class MarkovRandomField(nn.Module):
                 else:
                     values = torch.cat((values, encoded))
             
-            worlds = torch.where(self.universe_matrix[:,rows] == values, 1, 0).bool().to(self.device)
-            satasfied_worlds = mrf_utils.batch_collapse_sideways(worlds.unsqueeze(1)).squeeze()
+            for world_batch in mrf_utils.iter_universe_batches(self.random_variables, self.max_parallel_worlds):
+                worlds = torch.where(world_batch[:,rows] == values, True, False).bool().to(self.device)
+                satasfied_worlds = mrf_utils.batch_collapse_sideways(worlds.unsqueeze(1)).squeeze()
  
-            satasfied_worlds_indices = satasfied_worlds * torch.tensor(range(1,len(self.universe_matrix)+1), dtype=torch.long, device=self.device)
-            
-            satasfied_worlds_indices = satasfied_worlds_indices[satasfied_worlds_indices.nonzero(as_tuple=True)] -1
-            probability = torch.sum(self(self.universe_matrix[satasfied_worlds_indices].to(self.device)))
-            probabilities[idx] = probability
+                satasfied_worlds_indices = satasfied_worlds * torch.tensor(range(1,len(world_batch)+1), dtype=torch.long, device=self.device)
+                satasfied_worlds_indices = satasfied_worlds_indices[satasfied_worlds_indices.nonzero(as_tuple=True)] -1
+                probability = torch.sum(self(world_batch[satasfied_worlds_indices].to(self.device)))
+                probabilities[idx] += probability
         
         return probabilities
 
+    def _forward_world_batch(self, clique_features, world_batch):
+        b = len(clique_features)
+        #move world batch to own device
+        world_batch = world_batch.to(self.device).detach()
+        #collapse the worlds where the clique feature holds
+        fitting_worlds = torch.repeat_interleave(world_batch.unsqueeze(1), b, 1).detach() == clique_features
+
+        collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
+        return collapsed
 
     def forward(self, samples):
         """Get the probabilities of a batch of worlds. The batch has to have the shape (num_samples, num_world_features).
@@ -229,33 +219,54 @@ class MarkovRandomField(nn.Module):
 
         Returns probabilities (tensor<double>): A tensor with the probability of each sample.
         """
+
         #get batch and world dimension
         b, k = samples.shape
 
-        #construct result probability masses
+        #construct result probability masses as neutral element of multiplication
         world_probability_masses = torch.ones(size=(b,), dtype=torch.double, device=self.device)
 
-        #for every clique
-        for clique, clique_universe in self.clique_universes.items():
+        #calculate the amount of worlds that can be processed w. r. t. the batch size
+        #effective_parallel_worlds =  max(1, math.floor(self.max_parallel_worlds/b))
 
+        #for every clique
+        for clique in self.cliques:
                 #get the rows of the clique in the universe
                 rows = self.clique_rows_in_univserse[clique]
-
-                #get the clique features of each world
-                clique_features = samples[:,rows]
-
-                #collapse the worlds where the clique feature holds
-                fitting_worlds = torch.repeat_interleave(clique_universe.unsqueeze(1), b, 1) == clique_features
-                collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
-
-                #get the weight of each holding clique
-                clique_weights = collapsed * torch.repeat_interleave(self.clique_weights[str(clique)].unsqueeze(1), b, 1)
-
-                #sum up the weights
-                clique_weights = torch.sum(clique_weights, dim=-2)
                 
-                #multiply with the weight of each previous clique
-                world_probability_mass = world_probability_masses * clique_weights
-        
+                #get the clique features of each world
+                clique_features = samples[:,rows].detach()
+                
+                world_begin = 0
+                #for every batch of worlds
+                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds):
+                    
+                    #move world batch to own device
+                    world_batch = world_batch.to(self.device).detach()
+
+                    #get the amount of worlds in the world batch
+                    w,_ = world_batch.shape
+
+                    #track beginning of world and ending of world to use the right weights.
+                    world_end = world_begin + w
+
+                    #collapse the worlds where the clique feature holds
+                    fitting_worlds = torch.repeat_interleave(world_batch.unsqueeze(1), b, 1).detach() == clique_features
+
+                    collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
+                    
+                    #get the clique weights for the current worlds
+                    clique_weights = self.clique_weights[str(clique)][world_begin:world_end]
+
+                    #get the weight of each holding clique
+                    clique_weights = collapsed * torch.repeat_interleave(clique_weights.unsqueeze(1), b, 1)
+ 
+                    #sum up the weights
+                    clique_weights = torch.sum(clique_weights, dim=-2)
+
+                    #multiply with the weight of each previous clique
+                    world_probability_mass = world_probability_masses * clique_weights
+                    world_begin = world_end
+                    
         #scale by the overall probability mass
         return world_probability_mass / self.Z
