@@ -9,6 +9,7 @@ import math
 import frozenlist
 
 
+
 class MarkovRandomField(nn.Module):
     """Represents a Markov Random Field (MRF) from a set of random variables and cliques.
     
@@ -33,7 +34,7 @@ class MarkovRandomField(nn.Module):
         
     """
 
-    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = pow(2,20),verbose=True):
+    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = pow(2,20),verbose=1):
         """Construct a Markov Random Field from the nodes and edges.
 
         Args:
@@ -44,7 +45,7 @@ class MarkovRandomField(nn.Module):
             device (str): The device where the Markov Random Field will perform most of its calculations
             max_parallel_worlds (int): The maximum number of worlds that are evaluated at once on the graphics card.
                 This parameter can produce an Cuda Out of Memory Error when picked too large and slow down speed when picked too small.
-            verbose (bool): Whether to show progression bars or not
+            verbose (int): Level of verbosity
 
         """
         super(MarkovRandomField, self).__init__()
@@ -71,8 +72,11 @@ class MarkovRandomField(nn.Module):
 
         self._initialize_weights()
         self._init_rows_in_univserse()
-        self.calc_z()
 
+        #self.calc_z()
+        #by intializing all weights with 1 we can skip the first Z calculation and exploit 1 being the netraul
+        #multiplication element
+        self.Z = torch.prod(torch.tensor([var.domain_length for var in self.random_variables]))
 
     def _init_rows_in_univserse(self):
         """Initialize the indices of the rows of every clique and random variable in the universe matrix."""
@@ -98,7 +102,7 @@ class MarkovRandomField(nn.Module):
         for clique in self.cliques:
             num_worlds = torch.prod(torch.tensor([var.domain_length for var in clique]))
             #have to use the string representation here because parameter dicts only allow strings as keys
-            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.rand(size=(num_worlds,), 
+            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.ones(size=(num_worlds,), 
                                                      dtype=torch.double, device=self.device))
             
 
@@ -138,13 +142,14 @@ class MarkovRandomField(nn.Module):
         #initialize new Z
         new_Z = torch.tensor(0, dtype=torch.double, device=self.device)
 
+        max_worlds = math.floor(math.sqrt(self.max_parallel_worlds))
+
         #iterate over world batches
-        for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=self.max_parallel_worlds, verbose=self.verbose):
-            
-            world_batch = world_batch.to(self.device)
+        for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=max_worlds, 
+                                                           verbose=self.verbose > 0):
             
             #calc their probability mass
-            probabilities = self(world_batch)
+            probabilities = self(world_batch.to(self.device))
 
             #add up the new overall probability mass
             new_Z += torch.sum(probabilities)
@@ -211,6 +216,12 @@ class MarkovRandomField(nn.Module):
         collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
         return collapsed
 
+    def _weight_collapsed_batch(self, weights, collapsed):
+        _,b = collapsed.shape
+        #get the weight of each holding clique
+        clique_weights = collapsed * torch.repeat_interleave(weights.unsqueeze(1), b, 1)
+        return clique_weights
+
     def forward(self, samples):
         """Get the probabilities of a batch of worlds. The batch has to have the shape (num_samples, num_world_features).
         
@@ -239,28 +250,25 @@ class MarkovRandomField(nn.Module):
                 
                 world_begin = 0
                 #for every batch of worlds
-                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds):
+                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds,
+                                                                   verbose = self.verbose > 1):
                     
-                    #move world batch to own device
-                    world_batch = world_batch.to(self.device).detach()
+                    collapsed = self._forward_world_batch(clique_features,world_batch)
 
                     #get the amount of worlds in the world batch
                     w,_ = world_batch.shape
 
                     #track beginning of world and ending of world to use the right weights.
                     world_end = world_begin + w
-
-                    #collapse the worlds where the clique feature holds
-                    fitting_worlds = torch.repeat_interleave(world_batch.unsqueeze(1), b, 1).detach() == clique_features
-
-                    collapsed = mrf_utils.batch_collapse_sideways(fitting_worlds)
                     
                     #get the clique weights for the current worlds
                     clique_weights = self.clique_weights[str(clique)][world_begin:world_end]
 
                     #get the weight of each holding clique
-                    clique_weights = collapsed * torch.repeat_interleave(clique_weights.unsqueeze(1), b, 1)
- 
+                    clique_weights = self._weight_collapsed_batch(clique_weights, collapsed)
+                    
+                    #clique_weights = collapsed * torch.repeat_interleave(clique_weights.unsqueeze(1), b, 1)
+
                     #sum up the weights
                     clique_weights = torch.sum(clique_weights, dim=-2)
 
@@ -270,3 +278,4 @@ class MarkovRandomField(nn.Module):
                     
         #scale by the overall probability mass
         return world_probability_mass / self.Z
+        
