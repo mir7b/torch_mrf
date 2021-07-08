@@ -3,7 +3,7 @@
 import torch
 import itertools
 import tqdm
-from torch_mrf.torch_random_variable import RandomVariable
+#from torch_mrf.torch_random_variable import RandomVariable
 
 def create_universe_matrix(random_variables, verbose=False):
     """Calculate the universe of a set of random variables.

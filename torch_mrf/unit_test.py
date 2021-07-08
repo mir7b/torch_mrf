@@ -1,6 +1,6 @@
 import torch_mrf.mrf
 import torch_mrf.alarm_dataset
-import torch_mrf.fraction_mrf
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
