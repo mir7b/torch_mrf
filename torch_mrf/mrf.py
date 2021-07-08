@@ -96,14 +96,14 @@ class MarkovRandomField(nn.Module):
             self.clique_weights[clique].data = F.relu(weights)
 
 
-    def _initialize_weights(self):
+    def _initialize_weights(self, fill_value=1):
         """Initialize the weights for each world of each clique from a unifrom distribution with bounds of (0,1)."""
         self.clique_weights = nn.ParameterDict()
         for clique in self.cliques:
             num_worlds = torch.prod(torch.tensor([var.domain_length for var in clique]))
             #have to use the string representation here because parameter dicts only allow strings as keys
-            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.ones(size=(num_worlds,), 
-                                                     dtype=torch.double, device=self.device))
+            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.full(size=(num_worlds,), 
+                                            fill_value=fill_value, dtype=torch.double, device=self.device))
             
 
     def _get_rows_in_universe(self, random_variables):
@@ -125,6 +125,33 @@ class MarkovRandomField(nn.Module):
 
         for variable in random_variables:
             pos = self.random_variables.index(variable)
+            begin = torch.sum(world_encoding_lengths[:pos])
+            end = torch.sum(world_encoding_lengths[:pos+1])
+            for value in range(begin, end):
+                rows[row_idx] = value
+                row_idx += 1
+
+        return rows
+
+    def _get_rows_in_clique(self, clique, random_variables):
+        """Get the row indices of the random_variables in the clique universe.
+        
+        Args:
+            random_variables (iterable<torch_random_variable.RandomVariable>): The random variables which row
+            slices are desired
+
+        Returns:
+            rows (torch.Tenosr<torch.long>): A tensor that contains the slices of the variables.
+        """
+        world_encoding_lengths = torch.tensor([variable.encoding_length for variable in self.random_variables])
+        
+        local_encoding_lengths = torch.tensor([variable.encoding_length for variable in random_variables])
+
+        rows = torch.zeros(size=(torch.sum(local_encoding_lengths),), dtype=torch.long)
+        row_idx = 0
+
+        for variable in random_variables:
+            pos = clique.index(variable)
             begin = torch.sum(world_encoding_lengths[:pos])
             end = torch.sum(world_encoding_lengths[:pos+1])
             for value in range(begin, end):
@@ -201,7 +228,7 @@ class MarkovRandomField(nn.Module):
  
                 satasfied_worlds_indices = satasfied_worlds * torch.tensor(range(1,len(world_batch)+1), dtype=torch.long, device=self.device)
                 satasfied_worlds_indices = satasfied_worlds_indices[satasfied_worlds_indices.nonzero(as_tuple=True)] -1
-                probability = torch.sum(self(world_batch[satasfied_worlds_indices].to(self.device)))
+                probability = self(world_batch[satasfied_worlds_indices].to(self.device)).sum()
                 probabilities[idx] += probability
         
         return probabilities
@@ -279,3 +306,42 @@ class MarkovRandomField(nn.Module):
         #scale by the overall probability mass
         return world_probability_mass / self.Z
         
+    def fit(self, dataloader):
+        """Fit the model to the conjunctive probability distribution of the data without having to rely 
+           on gradient descent (which has to recalculate Z every once in a while.)"""
+
+        dataset_length = len(dataloader.dataset)
+        if self.verbose > 0:
+            pbar = tqdm.tqdm(dataloader, desc="Fitting MRF", 
+                             total=math.ceil(dataset_length / dataloader.batch_size))
+
+        self._initialize_weights(0)
+
+        #for every batch provided by the dataloader
+        for batch in pbar if self.verbose > 0 else dataloader:
+
+            #for every clique
+            for clique in self.cliques:
+                #get the rows of the clique in the universe
+                rows = self.clique_rows_in_univserse[clique]
+                
+                #get the clique features of each world
+                clique_features = batch[:,rows].detach().to(self.device)
+
+                world_begin = 0
+
+                #for every batch of worlds
+                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds,
+                                                                   verbose = self.verbose > 1):
+                    #get the amount of worlds in the world batch
+                    w,_ = world_batch.shape
+
+                    #track beginning of world and ending of world to use the right weights.
+                    world_end = world_begin + w
+
+                    collapsed = self._forward_world_batch(clique_features,world_batch.to(self.device))
+                    summed = torch.sum(collapsed,dim=1)
+                    with torch.no_grad():
+                        self.clique_weights[str(clique)][world_begin:world_end] = self.clique_weights[str(clique)][world_begin:world_end] + (summed/ torch.full(summed.shape, dataset_length).to(self.device)).to(self.device)
+
+                    world_begin = world_end
