@@ -7,8 +7,10 @@ from torch_mrf import mrf_utils
 import tqdm
 import math
 import frozenlist
-
-
+import plotly.express as px
+import plotly.graph_objects as go
+import networkx
+import itertools
 
 class MarkovRandomField(nn.Module):
     """Represents a Markov Random Field (MRF) from a set of random variables and cliques.
@@ -175,6 +177,7 @@ class MarkovRandomField(nn.Module):
         for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=max_worlds, 
                                                            verbose=self.verbose > 0):
             
+            print(world_batch)
             #calc their probability mass
             probabilities = self(world_batch.to(self.device))
 
@@ -293,18 +296,19 @@ class MarkovRandomField(nn.Module):
 
                     #get the weight of each holding clique
                     clique_weights = self._weight_collapsed_batch(clique_weights, collapsed)
-                    
+
                     #clique_weights = collapsed * torch.repeat_interleave(clique_weights.unsqueeze(1), b, 1)
 
-                    #sum up the weights
+                    #sum up the weights (a bunch of 0s and one weight that matters)
                     clique_weights = torch.sum(clique_weights, dim=-2)
 
                     #multiply with the weight of each previous clique
-                    world_probability_mass = world_probability_masses * clique_weights
+                    world_probability_masses = world_probability_masses * clique_weights
+
                     world_begin = world_end
                     
         #scale by the overall probability mass
-        return world_probability_mass / self.Z
+        return world_probability_masses / self.Z
         
     def fit(self, dataloader):
         """Fit the model to the conjunctive probability distribution of the data without having to rely 
@@ -345,3 +349,100 @@ class MarkovRandomField(nn.Module):
                         self.clique_weights[str(clique)][world_begin:world_end] = self.clique_weights[str(clique)][world_begin:world_end] + (summed/ torch.full(summed.shape, dataset_length).to(self.device)).to(self.device)
 
                     world_begin = world_end
+
+    def plot_clique(self, clique):
+        rows = [self._get_rows_in_clique(clique, [var]) for var in clique]
+            
+        for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds, verbose=self.verbose>0):
+            interpretations = torch.tensor([var.decode(world_batch[:,rows[idx]]) for idx, var in enumerate(clique)]).T
+            interpretations = [str(ip) for ip in interpretations]
+            fig = px.bar(x = interpretations, y = self.clique_weights[str(clique)].cpu().detach(),
+                    title="Clique: " + str([var.name for var in clique]))
+            
+            fig.update_layout(xaxis_title="Clique Intepretation",yaxis_title="Probability",)
+            fig.show()
+    
+    def plot_graph(self):
+        nodes = set([var.name for var in self.random_variables])
+        edges = []
+        for clique in self.cliques:
+            names = [var.name for var in clique]
+            edges.extend(list(itertools.product(names, names)))
+        
+        graph = networkx.Graph()
+
+        graph.add_nodes_from(nodes)
+        graph.add_edges_from(edges)
+        pos = networkx.drawing.layout.spring_layout(graph)
+
+        edge_x = []
+        edge_y = []
+        for edge in graph.edges():
+            x0,y0 = pos[edge[0]]
+            x1,y1 = pos[edge[1]]
+
+            edge_x.append(x0)
+            edge_x.append(x1)
+            edge_x.append(None)
+            edge_y.append(y0)
+            edge_y.append(y1)
+            edge_y.append(None)
+
+        edge_trace = go.Scatter(
+            x=edge_x, y=edge_y,
+            line=dict(width=0.5, color='#888'),
+            hoverinfo='none',
+            mode='lines')
+
+        node_x = []
+        node_y = []
+        for node in graph.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+
+        node_trace = go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers',
+            hoverinfo='text',
+            marker=dict(
+                showscale=True,
+                colorscale='YlGnBu',
+                reversescale=True,
+                color=[],
+                size=10,
+                colorbar=dict(
+                    thickness=15,
+                    title='Node Connections',
+                    xanchor='left',
+                    titleside='right'
+                ),
+                line_width=2))
+
+        node_adjacencies = []
+        node_text = []
+        
+        for node, adjacencies in enumerate(graph.adjacency()):
+            node_adjacencies.append(len(adjacencies[1]))
+            node_text.append("Variable Name: " + str(list(graph.nodes())[node]))
+
+        node_trace.marker.color = node_adjacencies
+        node_trace.text = node_text
+
+        fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title='Structure of Markov Random Field',
+                #titlefont_size=16,
+                showlegend=False,
+                hovermode='closest',
+                #margin=dict(b=20,l=5,r=5,t=40),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
+        fig.show()
+
+    def plot(self):
+        self.plot_graph()
+        for clique in self.cliques:
+            self.plot_clique(clique)
+            

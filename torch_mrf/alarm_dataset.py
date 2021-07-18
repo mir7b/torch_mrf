@@ -1,7 +1,7 @@
 """This module holds implementations of Datasets which can be used for MRFs."""
 
 import torch
-from torch_mrf.torch_random_variable import BinaryRandomVariable, RandomVariable
+from torch_random_variable.torch_random_variable import BinaryRandomVariable, RandomVariable
 
 class AlarmDataset(torch.utils.data.Dataset):
     """A dataset for a Markov Random Field (MRF) with which the mrf can be tested and debugged.
