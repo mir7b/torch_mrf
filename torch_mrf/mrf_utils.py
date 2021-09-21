@@ -52,6 +52,10 @@ def iter_universe_batches(random_variables, max_worlds=pow(2,20), verbose=False)
         #create all worlds as integer encoding
         universe_batch = torch.cartesian_prod(*chunked_domain)
 
+        #handle solo cliques
+        if len(universe_batch.shape) == 1:
+            universe_batch = universe_batch.unsqueeze(1)
+
         #convert that to binary encoding
         binary_universe_batch = torch.zeros(size=(len(universe_batch), torch.sum(encoding_lengths)), dtype=torch.bool)
         for idx, column in enumerate(universe_batch.T):

@@ -80,6 +80,7 @@ class MarkovRandomField(nn.Module):
         #multiplication element
         self.Z = torch.prod(torch.tensor([var.domain_length for var in self.random_variables]))
 
+
     def _init_rows_in_univserse(self):
         """Initialize the indices of the rows of every clique and random variable in the universe matrix."""
         self.random_variable_row_in_univserse = dict()
@@ -106,7 +107,14 @@ class MarkovRandomField(nn.Module):
             #have to use the string representation here because parameter dicts only allow strings as keys
             self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.full(size=(num_worlds,), 
                                             fill_value=fill_value, dtype=torch.double, device=self.device))
-            
+    
+    def _initialize_weights_indexable(self, fill_value):
+        self.clique_weights = nn.ParameterDict()
+        for clique in self.cliques:
+            num_bits = torch.sum(torch.tensor([var.encoding_length for var in clique]))
+            #have to use the string representation here because parameter dicts only allow strings as keys
+            self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.full(size=(2,)*num_bits, 
+                                            fill_value=fill_value, dtype=torch.double, device="cpu"))
 
     def _get_rows_in_universe(self, random_variables):
         """Get the row indices of the random_variables in the universe.
@@ -171,13 +179,12 @@ class MarkovRandomField(nn.Module):
         #initialize new Z
         new_Z = torch.tensor(0, dtype=torch.double, device=self.device)
 
-        max_worlds = math.floor(math.sqrt(self.max_parallel_worlds))
+        #max_worlds = math.floor(math.sqrt(self.max_parallel_worlds))
 
         #iterate over world batches
-        for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=max_worlds, 
+        for world_batch in mrf_utils.iter_universe_batches(self.random_variables, max_worlds=self.max_parallel_worlds, 
                                                            verbose=self.verbose > 0):
-            
-            print(world_batch)
+
             #calc their probability mass
             probabilities = self(world_batch.to(self.device))
 
@@ -262,13 +269,10 @@ class MarkovRandomField(nn.Module):
         """
 
         #get batch and world dimension
-        b, k = samples.shape
+        b, _ = samples.shape
 
         #construct result probability masses as neutral element of multiplication
         world_probability_masses = torch.ones(size=(b,), dtype=torch.double, device=self.device)
-
-        #calculate the amount of worlds that can be processed w. r. t. the batch size
-        #effective_parallel_worlds =  max(1, math.floor(self.max_parallel_worlds/b))
 
         #for every clique
         for clique in self.cliques:
@@ -278,38 +282,22 @@ class MarkovRandomField(nn.Module):
                 #get the clique features of each world
                 clique_features = samples[:,rows].detach()
                 
-                world_begin = 0
-                #for every batch of worlds
-                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds,
-                                                                   verbose = self.verbose > 1):
-                    
-                    collapsed = self._forward_world_batch(clique_features,world_batch)
+                rows = len(self.clique_weights[str(clique)].shape)
 
-                    #get the amount of worlds in the world batch
-                    w,_ = world_batch.shape
-
-                    #track beginning of world and ending of world to use the right weights.
-                    world_end = world_begin + w
-                    
-                    #get the clique weights for the current worlds
-                    clique_weights = self.clique_weights[str(clique)][world_begin:world_end]
-
-                    #get the weight of each holding clique
-                    clique_weights = self._weight_collapsed_batch(clique_weights, collapsed)
-
-                    #clique_weights = collapsed * torch.repeat_interleave(clique_weights.unsqueeze(1), b, 1)
-
-                    #sum up the weights (a bunch of 0s and one weight that matters)
-                    clique_weights = torch.sum(clique_weights, dim=-2)
-
-                    #multiply with the weight of each previous clique
-                    world_probability_masses = world_probability_masses * clique_weights
-
-                    world_begin = world_end
+                weights = self.clique_weights[str(clique)][clique_features.long().chunk(rows,-1)].to(self.device)
+                world_probability_masses *= weights.squeeze(-1)
                     
         #scale by the overall probability mass
         return world_probability_masses / self.Z
         
+    def rescale_weights(self):
+        """Rescale the weights such that the solution of the mrf does not change but Z does not get too big or small."""
+        for clique in self.cliques:
+            num_worlds = torch.prod(torch.tensor([var.domain_length for var in clique]))
+            with torch.no_grad():
+                self.clique_weights[str(clique)] *= num_worlds/len(self.cliques)
+                
+
     def fit(self, dataloader):
         """Fit the model to the conjunctive probability distribution of the data without having to rely 
            on gradient descent (which has to recalculate Z every once in a while.)"""
@@ -319,7 +307,8 @@ class MarkovRandomField(nn.Module):
             pbar = tqdm.tqdm(dataloader, desc="Fitting MRF", 
                              total=math.ceil(dataset_length / dataloader.batch_size))
 
-        self._initialize_weights(0)
+        #self._initialize_weights(0)
+        self._initialize_weights_indexable(0)
 
         #for every batch provided by the dataloader
         for batch in pbar if self.verbose > 0 else dataloader:
@@ -332,34 +321,31 @@ class MarkovRandomField(nn.Module):
                 #get the clique features of each world
                 clique_features = batch[:,rows].detach().to(self.device)
 
-                world_begin = 0
+                features, counts = clique_features.unique(dim=0, return_counts=True)
+                
+                #get the amount of bits (rows) of every clique state
+                rows = len(self.clique_weights[str(clique)].shape)
 
-                #for every batch of worlds
-                for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds,
-                                                                   verbose = self.verbose > 1):
-                    #get the amount of worlds in the world batch
-                    w,_ = world_batch.shape
-
-                    #track beginning of world and ending of world to use the right weights.
-                    world_end = world_begin + w
-
-                    collapsed = self._forward_world_batch(clique_features,world_batch.to(self.device))
-                    summed = torch.sum(collapsed,dim=1)
-                    with torch.no_grad():
-                        self.clique_weights[str(clique)][world_begin:world_end] = self.clique_weights[str(clique)][world_begin:world_end] + (summed/ torch.full(summed.shape, dataset_length).to(self.device)).to(self.device)
-
-                    world_begin = world_end
-
+                with torch.no_grad():
+                    self.clique_weights[str(clique)][features.long().chunk(rows,-1)] += (counts/dataset_length).unsqueeze(-1).cpu()
+                
+        self.rescale_weights()
+        self.calc_z()
+    
+    
     def plot_clique(self, clique):
         rows = [self._get_rows_in_clique(clique, [var]) for var in clique]
-            
+
         for world_batch in mrf_utils.iter_universe_batches(list(clique),self.max_parallel_worlds, verbose=self.verbose>0):
             interpretations = torch.tensor([var.decode(world_batch[:,rows[idx]]) for idx, var in enumerate(clique)]).T
             interpretations = [str(ip) for ip in interpretations]
-            fig = px.bar(x = interpretations, y = self.clique_weights[str(clique)].cpu().detach(),
+            
+            num_bits = len(self.clique_weights[str(clique)].shape)
+            y = self.clique_weights[str(clique)][world_batch.long().chunk(num_bits,-1)]
+            fig = px.bar(x = interpretations, y = y.flatten().cpu().detach(),
                     title="Clique: " + str([var.name for var in clique]))
             
-            fig.update_layout(xaxis_title="Clique Intepretation",yaxis_title="Probability",)
+            fig.update_layout(xaxis_title="Clique Intepretation",yaxis_title="Clique Potential of World",)
             fig.show()
     
     def plot_graph(self):
