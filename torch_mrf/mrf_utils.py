@@ -3,6 +3,7 @@
 import torch
 import itertools
 import tqdm
+import networkx
 
 def create_universe_matrix(random_variables, verbose=False):
     """Calculate the universe of a set of random variables.
@@ -96,3 +97,20 @@ def chunks(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i:i + n]
+
+
+def mrf_to_networkx(mrf) -> networkx.Graph:
+    """Create a networkx graph of the structure of the mrf.
+    
+    Args:
+        mrf (mrf.MarkovRandomField): The mrf
+    """
+    graph = networkx.Graph()
+    nodes = [var.name for var in mrf.random_variables]
+    graph.add_nodes_from(nodes)
+    for clique in mrf.cliques:
+        clique = [var.name for var in clique]
+        for combination in itertools.combinations(clique, 2):
+            graph.add_edge(*combination)
+
+    return graph

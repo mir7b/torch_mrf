@@ -18,16 +18,14 @@ def main():
     # model = torch_mrf.mrf.MarkovRandomField(dataset.random_variables, device="cuda",max_parallel_worlds=pow(2,16),
     #         cliques=[["Burglary", "Alarm", "Earthquake","JohnCalls"],["JohnCalls", "MaryCalls"]])
     
-    trainer = torch_mrf.trainer.Trainer()
-    model = trainer.train(model, dataloader)
+    trainer = torch_mrf.trainer.Trainer(model, dataloader, learn_structure=True)
+    model = trainer.train()
 
-    model.calc_z()
     print("Z=",model.Z)
-    print("Sum of probabilities:", trainer.rate_mrf(model, dataloader))
 
     partial_prediction = model.predict([dict(Alarm=True, Burglary=True, Earthquake=True),
                                         dict(Alarm=False, JohnCalls=False)])
-    # print(list(model.parameters()))
+    print(list(model.parameters()))
 
     print(partial_prediction.float())
     model.plot()
