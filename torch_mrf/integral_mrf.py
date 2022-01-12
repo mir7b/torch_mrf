@@ -10,10 +10,10 @@ import plotly.graph_objects as go
 import networkx
 import torch_random_variable.torch_random_variable as trv
 
-class CliqueFunction(nn.Module):
-    def __init__(self, random_variables:List[trv.RandomVariable], device:str or int="cuda", max_parallel_worlds:int = pow(2,20),
+class DiscreteCliqueFunction(nn.Module):
+    def __init__(self, random_variables:List[trv.RandomVariable], device:str or int="cpu:0", max_parallel_worlds:int = pow(2,20),
                  verbose:int=1, fill_value = 0.):
-        super(CliqueFunction, self).__init__()
+        super(DiscreteCliqueFunction, self).__init__()
         
         self.random_variables = random_variables
         self.device = device
@@ -28,9 +28,13 @@ class CliqueFunction(nn.Module):
     
     def fit(self, data:torch.Tensor):
         """data is a tensor of shape (number of observations ,number of random_variables in this clique))"""
-
-        for state in torch.cartesian_prod(*[torch.arange(var.domain_length) for var in self.random_variables]):
-            pass
+        with torch.no_grad():
+            for state in torch.cartesian_prod(*[torch.arange(var.domain_length) for var in self.random_variables]):
+                integral_value = 0
+                prob =  torch.all(data <= state, dim=1).double().sum()
+                prob /= float(len(data))
+                
+                self.weights[state.chunk(len(self.random_variables),-1)] = prob
     
 class IntegralMarkovRandomField(nn.Module):
     
@@ -68,12 +72,20 @@ class IntegralMarkovRandomField(nn.Module):
 
 def main():
     
-    a = trv.RandomVariable("Weather", ["Sunny", "Rainy", "Foggy"])
-    b = trv.RandomVariable("Mood", ["Good", "Bad"])
+    a = trv.DiscreteRandomVariable("Weather", [0,1,2,3])
+    b = trv.DiscreteRandomVariable("Mood", [0,1,2])
     
-    phi_1 = CliqueFunction([a,b])
+    phi_1 = DiscreteCliqueFunction([a,b])
     print(phi_1(torch.tensor([[0,0], [0,1]])))
-    phi_1.fit(0)
+
+    data = torch.cat((torch.randint(0,4, (100,)).unsqueeze(0), torch.randint(0,3, (100,)).unsqueeze(0))).T
+
+    phi_1.fit(data)
+    print(phi_1.weights)
+    print("P(a=3, b=2) =", torch.all(data == torch.tensor([2,1]), dim=1).sum())
+
+
+    
 
 if __name__ == "__main__":
     main()
