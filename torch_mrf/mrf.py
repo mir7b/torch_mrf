@@ -1,5 +1,6 @@
 """This file describes vecotrized Markov Random Fields for the GPU."""
 
+from typing import List, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import networkx
 import itertools
+import torch_random_variable.torch_random_variable as trv
 
 class MarkovRandomField(nn.Module):
     """Represents a Markov Random Field (MRF) from a set of random variables and cliques.
@@ -36,7 +38,8 @@ class MarkovRandomField(nn.Module):
         
     """
 
-    def __init__(self, random_variables, cliques, device="cuda", max_parallel_worlds = pow(2,20),verbose=1):
+    def __init__(self, random_variables:List[trv.RandomVariable], cliques:List[List[Union[str, trv.RandomVariable]]], 
+                device:str or int="cuda", max_parallel_worlds:int = pow(2,20),verbose:int=1):
         """Construct a Markov Random Field from the nodes and edges.
 
         Args:
@@ -53,17 +56,24 @@ class MarkovRandomField(nn.Module):
         super(MarkovRandomField, self).__init__()
 
         #sort random variables
-        self.random_variables = random_variables
+        self.random_variables:List[trv.RandomVariable] = random_variables
         self.random_variables.sort(key=lambda x: x.name)
-        self.verbose = verbose
-        self.device = device
-        self.max_parallel_worlds = max_parallel_worlds
+        self.verbose:int = verbose
+        self.device:str or int = device
+        self.max_parallel_worlds:int = max_parallel_worlds
 
         #parse clique members to variable if they arent already variables
         for idx, clique in enumerate(cliques):
             for jdx, partner in enumerate(clique):
                 if isinstance(partner, str):
-                    cliques[idx][jdx], = [var for var in self.random_variables if var.name==partner]
+                    corresponding_random_variables = [var for var in self.random_variables if var.name==partner]
+                    #check if the partner is part of this mrfs random variables
+                    if len(corresponding_random_variables) == 0:
+                        raise Exception("Random variable name %s was used in a clique, but it does not exist in\
+                                        the MRF. \n Random Variable names in this MRF: %s"\
+                                        % (partner, [var.name for var in self.random_variables]))
+
+                    cliques[idx][jdx] = corresponding_random_variables[0] 
 
         #sort the cliques and convert them to hashable datatypes
         self.cliques = [sorted(clique, key=lambda x: x.name) for clique in cliques]
@@ -116,7 +126,7 @@ class MarkovRandomField(nn.Module):
             self.clique_weights[str(clique)] = nn.parameter.Parameter(data=torch.full(size=(2,)*num_bits, 
                                             fill_value=fill_value, dtype=torch.double, device="cpu"))
 
-    def _get_rows_in_universe(self, random_variables):
+    def _get_rows_in_universe(self, random_variables:List[trv.RandomVariable]):
         """Get the row indices of the random_variables in the universe.
         
         Args:
@@ -143,7 +153,7 @@ class MarkovRandomField(nn.Module):
 
         return rows
 
-    def _get_rows_in_clique(self, clique, random_variables):
+    def _get_rows_in_clique(self, clique, random_variables:List[trv.RandomVariable]):
         """Get the row indices of the random_variables in the clique universe.
         
         Args:
@@ -268,6 +278,19 @@ class MarkovRandomField(nn.Module):
         Returns probabilities (tensor<double>): A tensor with the probability of each sample.
         """
 
+        return self.forward_no_z(samples) / self.Z
+        
+    
+    def forward_no_z(self, samples):
+        """Get the unnormalized probability masses of a batch of worlds. 
+            The batch has to have the shape (num_samples, num_world_features).
+        
+        Args:
+            samples (tensor<torch.bool>): The worlds which probabilities should be calculated
+
+        Returns probabilities (tensor<double>): A tensor with the probability of each sample.
+        """
+
         #get batch and world dimension
         b, _ = samples.shape
 
@@ -288,8 +311,18 @@ class MarkovRandomField(nn.Module):
                 world_probability_masses *= weights.squeeze(-1)
                     
         #scale by the overall probability mass
-        return world_probability_masses / self.Z
+        return world_probability_masses
+
+    
+    def cliques_of_variables(self, variable=None, variable_idx=None):
+        """Return all cliques that contain a variable.
+        """
+        if variable is None:
+            variable = self.variables[variable_idx]
         
+        return [clique for clique in self.cliques if variable in clique]
+            
+    
     def rescale_weights(self):
         """Rescale the weights such that the solution of the mrf does not change but Z does not get too big or small."""
         for clique in self.cliques:
@@ -298,39 +331,41 @@ class MarkovRandomField(nn.Module):
                 self.clique_weights[str(clique)] *= num_worlds/len(self.cliques)
                 
 
-    def fit(self, dataloader):
+    def fit(self, dataloader, rescale_weights=False):
         """Fit the model to the conjunctive probability distribution of the data without having to rely 
            on gradient descent (which has to recalculate Z every once in a while.)"""
+        with torch.no_grad():
+            dataset_length = len(dataloader.dataset)
+            if self.verbose > 0:
+                pbar = tqdm.tqdm(dataloader, desc="Fitting MRF", 
+                                total=math.ceil(dataset_length / dataloader.batch_size))
 
-        dataset_length = len(dataloader.dataset)
-        if self.verbose > 0:
-            pbar = tqdm.tqdm(dataloader, desc="Fitting MRF", 
-                             total=math.ceil(dataset_length / dataloader.batch_size))
+            #self._initialize_weights(0)
+            self._initialize_weights_indexable(0)
 
-        #self._initialize_weights(0)
-        self._initialize_weights_indexable(0)
+            #for every batch provided by the dataloader
+            for batch in pbar if self.verbose > 0 else dataloader:
 
-        #for every batch provided by the dataloader
-        for batch in pbar if self.verbose > 0 else dataloader:
+                #for every clique
+                for clique in self.cliques:
 
-            #for every clique
-            for clique in self.cliques:
-                #get the rows of the clique in the universe
-                rows = self.clique_rows_in_univserse[clique]
-                
-                #get the clique features of each world
-                clique_features = batch[:,rows].detach().to(self.device)
+                    #get the rows of the clique in the universe
+                    rows = self.clique_rows_in_univserse[clique]
+                    
+                    #get the clique features of each world
+                    clique_features = batch[:,rows].detach().to(self.device)
 
-                features, counts = clique_features.unique(dim=0, return_counts=True)
-                
-                #get the amount of bits (rows) of every clique state
-                rows = len(self.clique_weights[str(clique)].shape)
+                    features, counts = clique_features.unique(dim=0, return_counts=True)
+                    
+                    #get the amount of bits (rows) of every clique state
+                    rows = len(self.clique_weights[str(clique)].shape)
 
-                with torch.no_grad():
+
                     self.clique_weights[str(clique)][features.long().chunk(rows,-1)] += (counts/dataset_length).unsqueeze(-1).cpu()
-                
-        self.rescale_weights()
-        self.calc_z()
+              
+            if rescale_weights:  
+                self.rescale_weights()
+            self.calc_z()
     
     
     def plot_clique(self, clique):

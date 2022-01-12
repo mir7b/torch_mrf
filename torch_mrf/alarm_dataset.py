@@ -2,6 +2,7 @@
 
 import torch
 from torch_random_variable.torch_random_variable import BinaryRandomVariable, RandomVariable
+import tqdm
 
 class AlarmDataset(torch.utils.data.Dataset):
     """A dataset for a Markov Random Field (MRF) with which the mrf can be tested and debugged.
@@ -26,7 +27,31 @@ class AlarmDataset(torch.utils.data.Dataset):
         self.random_variables.append(BinaryRandomVariable(name="JohnCalls"))
         self.random_variables.sort(key=lambda x: x.name)
 
-        self.samples = torch.randint(low=0, high=2, size=(num_samples,len(self.random_variables))).bool()
+        burglary = torch.bernoulli(torch.full(size=(num_samples,), fill_value=0.1))
+        earthquake = torch.bernoulli(torch.full(size=(num_samples,), fill_value=0.2))
+
+        
+        alarm = torch.full(size=(num_samples,), fill_value=0.)
+        for idx, row in enumerate(tqdm.tqdm(torch.cat((burglary.unsqueeze(dim=0),earthquake.unsqueeze(dim=0)), dim=0).T, 
+                                  desc="Sampling Data")):
+            if torch.all(row == torch.tensor([1.,1.])):
+                alarm[idx] = 0.95
+            elif torch.all(row == torch.tensor([1.,0.])):
+                alarm[idx] = 0.94
+            elif torch.all(row == torch.tensor([0.,1.])):
+                alarm[idx] = 0.29
+            elif torch.all(row == torch.tensor([0.,0.])):
+                alarm[idx] = 0.1
+
+        alarm = torch.bernoulli(alarm)
+        
+        john_calls = torch.bernoulli(torch.where(alarm==1., 0.9, 0.05))
+        mary_calls = torch.bernoulli(torch.where(alarm==1., 0.7, 0.1))
+
+    
+        self.samples = torch.cat((alarm.unsqueeze(0), burglary.unsqueeze(0), earthquake.unsqueeze(0), john_calls.unsqueeze(0), 
+                                  mary_calls.unsqueeze(0))).bool().T
+
 
     def __len__(self):
         """Return the number of samples in this dataset.

@@ -58,3 +58,6 @@ class Trainer:
 
             if simpler_mrf_score - original_mrf_score < self.min_likelihood_improvement:
                 self.mrf = simpler_mrf
+
+    def fit_intervals(self, variable):
+        pass
