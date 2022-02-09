@@ -65,7 +65,35 @@ def iter_universe_batches(random_variables, max_worlds=pow(2,20), verbose=False)
         #yield the binary universe batch
         yield binary_universe_batch.detach()
         
-    
+
+def iter_universe_batches_(random_variables, max_worlds=pow(2,20), verbose=False):
+
+    random_variables = random_variables.copy()
+    domain_lengths = torch.tensor([var.domain_length for var in random_variables])
+    trimmed_domain_lengths = domain_lengths.clone()
+
+    #trimm the domain lengths of the variables to reduce the size of the generated mini-universes
+    while torch.prod(trimmed_domain_lengths) > max_worlds:
+        for idx, domain_length in enumerate(trimmed_domain_lengths):
+            if domain_length > 1:
+                trimmed_domain_lengths[idx] -= 1
+                break
+
+    chunked_domains = [list(chunks(torch.tensor(range(var.domain_length)), trimmed_domain_lengths[idx]))for idx, var in enumerate(random_variables)]
+
+    if verbose:
+        pbar =  tqdm.tqdm(itertools.product(*chunked_domains), desc="Iterating Worlds",
+                          total=torch.prod(torch.tensor([len(dom) for dom in chunked_domains])).item())
+    for chunked_domain in pbar if verbose else itertools.product(*chunked_domains):
+        #create all worlds as integer encoding
+        universe_batch:torch.Tensor = torch.cartesian_prod(*chunked_domain)
+
+        #handle solo cliques
+        if len(universe_batch.shape) == 1:
+            universe_batch = universe_batch.unsqueeze(1)
+
+        #yield the binary universe batch
+        yield universe_batch.detach()
 
 
 def batch_collapse_sideways(tensor):

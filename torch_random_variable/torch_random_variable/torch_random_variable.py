@@ -48,7 +48,7 @@ class RandomVariable(object):
         return str(self)
 
     def __str__(self):
-        return "Torch Random Variable " + self.name# + " with domain " + str(self.domain)
+        return self.name
 
     def __hash__(self):
         return hash(self.name)
@@ -58,6 +58,9 @@ class RandomVariable(object):
     
     def __ne__(self, other):
         return not (self == other)
+    
+    def __len__(self):
+        return len(self.domain)
 
 class MultiDomainRandomVariable(RandomVariable):
     """A random variable with a domain that consists of the cartesian product
@@ -112,7 +115,7 @@ class NumericRandomVariable(RandomVariable):
         return binary(torch.tensor(interval_idx),torch.tensor(self.encoding_length)).bool()
 
     def __str__(self):
-        return "Torch Numeric Random Variable " + self.name
+        return self.name
 
 
 class Interval:
