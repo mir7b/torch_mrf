@@ -1,9 +1,11 @@
 import torch
 import torch_random_variable.torch_random_variable as trv
 from torch_mrf.networks.markov_network import MarkovNetwork
+from torch_mrf.factors.gauss_factor import GaussFactor
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.subplots
+    
 
 def mnist():
     from sklearn.datasets import load_digits
@@ -14,7 +16,7 @@ def mnist():
     rvars = []
     for i in range(8):
         for j in range(8):
-            rvars.append(trv.RandomVariable("%s%s" % (i,j), list(range(7))))
+            rvars.append(trv.NumericRandomVariable("%s%s" % (i,j), list(range(7))))
     rvars.append(trv.RandomVariable("Digit", list(range(10))))
     
     X:torch.Tensor = torch.tensor(X)
@@ -22,15 +24,16 @@ def mnist():
     X = X/3
     X = X.long()
     y = torch.tensor(y).unsqueeze(-1).long()
-
+    
     cliques = []
     for i in range(8):
         for j in range(8):
             clique = ["%s%s" % (i,j), "Digit"]
-            if i < 7:
-                cliques.append( clique + ["%s%s" % (i+1,j)])
-            if j < 7:
-                cliques.append( clique + ["%s%s" % (i,j+1)])
+            # if i < 7:
+            #     cliques.append( clique + ["%s%s" % (i+1,j)])
+            # if j < 7:
+            #     cliques.append( clique + ["%s%s" % (i,j+1)])
+            cliques.append(clique)
 
 
     data = torch.cat((X,y),dim=-1)
@@ -49,7 +52,7 @@ def mnist():
     
     print(sklearn.metrics.confusion_matrix(y,prediction.numpy()))
     print(sklearn.metrics.accuracy_score(y,prediction.numpy()))
-
+    
     missclassifications = prediction != y.squeeze()
     missclassifications = missclassifications.nonzero()
     
