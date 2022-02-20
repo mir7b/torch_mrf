@@ -23,7 +23,7 @@ class DiscreteFactor(nn.Module):
     """
     
     def __init__(self,random_variables:List[trv.RandomVariable], device:str or int="cuda",
-                 max_parallel_worlds:int = pow(2,20), fill_value = 1., verbosity:int=1):
+                 max_parallel_worlds:int = pow(2,20), fill_value = 0., verbosity:int=1):
         """Create a factor that describes the potential of each state. This factor has exponential many parameters in the
         number of random variables.
 
@@ -68,17 +68,13 @@ class DiscreteFactor(nn.Module):
                                  and and indexable type like long or bool etc.
         """
         with torch.no_grad():
-            if self.verbosity <=1:
-                for state in torch.cartesian_prod(*[torch.arange(var.domain_length) for var in self.random_variables]):
-                    prob =  torch.all(data == state, dim=1).double().sum()
-                    prob /= float(len(data))
-                    self.weights[state.chunk(len(self.random_variables),-1)] = prob
-            else:
-                for state in tqdm.tqdm(torch.cartesian_prod(*[torch.arange(var.domain_length) for var in self.random_variables]),
-                                       desc="Fitting Factor %s" % self.random_variables):
-                    prob =  torch.all(data == state, dim=1).double().sum()
-                    prob /= float(len(data))
-                    self.weights[state.chunk(len(self.random_variables),-1)] = prob
+            values, count = data.unique(return_counts=True, dim=0)
+            counts = count.to(self.device)
+            values = values.to(self.device)
+            for value, count in zip(values, counts) if self.verbosity <=1 else \
+                tqdm.tqdm(zip(values, counts), desc="Fitting Clique %s" % self.random_variables, total=len(counts)):
+                self.weights[tuple(value)] = count.double()
+            self.weights /= self.weights.sum()
     
     def plot(self) -> go.Bar:
         """Visaulizes the potential of each world as bar trace.

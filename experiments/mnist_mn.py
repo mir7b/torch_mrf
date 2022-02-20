@@ -10,13 +10,12 @@ import plotly.subplots
 def mnist():
     from sklearn.datasets import load_digits
     import sklearn.metrics
-    from torchvision import transforms
     X,y = load_digits(return_X_y = True)
     
     rvars = []
     for i in range(8):
         for j in range(8):
-            rvars.append(trv.NumericRandomVariable("%s%s" % (i,j), list(range(7))))
+            rvars.append(trv.RandomVariable("%s%s" % (i,j), list(range(7))))
     rvars.append(trv.RandomVariable("Digit", list(range(10))))
     
     X:torch.Tensor = torch.tensor(X)
@@ -37,7 +36,7 @@ def mnist():
 
 
     data = torch.cat((X,y),dim=-1)
-    model = MarkovNetwork(rvars, cliques, device="cuda")
+    model = MarkovNetwork(rvars, cliques, device="cpu", verbose=2)
     model.fit(data, calc_z=False)
 
     prediction = torch.zeros(y.shape)
@@ -48,14 +47,13 @@ def mnist():
     probability = model(queries)
     probability = probability.reshape(len(X),10).cpu().detach()
     prediction = torch.argmax(probability, dim=1).long()
-
     
     print(sklearn.metrics.confusion_matrix(y,prediction.numpy()))
     print(sklearn.metrics.accuracy_score(y,prediction.numpy()))
     
     missclassifications = prediction != y.squeeze()
     missclassifications = missclassifications.nonzero()
-    
+    exit()
     if len(missclassifications) == 0:
         exit()
         

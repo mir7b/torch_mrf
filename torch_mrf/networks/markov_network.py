@@ -75,7 +75,7 @@ class MarkovNetwork(nn.Module):
         self.cliques:nn.ModuleList = nn.ModuleList()
         
         for clique in cliques:
-            phi = factor(clique, self.device, self.max_parallel_worlds)
+            phi = factor(clique, self.device, self.max_parallel_worlds, verbosity=self.verbose)
             self.cliques.append(phi)
             
         self.Z = torch.tensor(1, dtype=torch.double)
