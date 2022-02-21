@@ -28,16 +28,16 @@ def mnist():
     for i in range(8):
         for j in range(8):
             clique = ["%s%s" % (i,j), "Digit"]
-            # if i < 7:
-            #     cliques.append( clique + ["%s%s" % (i+1,j)])
-            # if j < 7:
-            #     cliques.append( clique + ["%s%s" % (i,j+1)])
+            if i < 7:
+                cliques.append( clique + ["%s%s" % (i+1,j)])
+            if j < 7:
+                cliques.append( clique + ["%s%s" % (i,j+1)])
             cliques.append(clique)
 
 
     data = torch.cat((X,y),dim=-1)
     model = MarkovNetwork(rvars, cliques, device="cpu", verbose=2)
-    model.fit(data, calc_z=False)
+    model.fit(data, calc_z=False, rescale_weights=True)
 
     prediction = torch.zeros(y.shape)
     
@@ -53,7 +53,7 @@ def mnist():
     
     missclassifications = prediction != y.squeeze()
     missclassifications = missclassifications.nonzero()
-    exit()
+    
     if len(missclassifications) == 0:
         exit()
         

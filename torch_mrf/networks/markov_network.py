@@ -72,12 +72,14 @@ class MarkovNetwork(nn.Module):
 
                     cliques[idx][jdx] = corresponding_random_variables[0]
         
-        self.cliques:nn.ModuleList = nn.ModuleList()
+        self.cliques:nn.ModuleList[DiscreteFactor] = nn.ModuleList()
         
         for clique in cliques:
             phi = factor(clique, self.device, self.max_parallel_worlds, verbosity=self.verbose)
             self.cliques.append(phi)
-            
+        
+        self.cliques_rescalings:torch.Tesnor = torch.ones((len(self.cliques)))
+        
         self.Z = torch.tensor(1, dtype=torch.double)
 
     def _get_rows_in_universe(self, random_variables:List[trv.RandomVariable]):
@@ -105,20 +107,24 @@ class MarkovNetwork(nn.Module):
 
     def forward_no_z(self, x):
         probs = torch.ones((len(x),), device = self.device, dtype = torch.float)
-        for clique in self.cliques:
+        for idx, clique in enumerate(self.cliques):
             rows = self._get_rows_in_universe(clique.random_variables)
-            potential = clique(x[:,rows])
+            potential = clique(x[:,rows]) * self.cliques_rescalings[idx]
             probs = probs * potential
         return probs
 
 
-    def fit(self, x, calc_z=True, rescale_weights=True):
+    def fit(self, x, calc_z=False, rescale_weights=True):
         with torch.no_grad():
-            for clique in tqdm.tqdm(self.cliques, desc="Fitting model parameters"):
+            for idx, clique in tqdm.tqdm(enumerate(self.cliques), desc="Fitting model parameters", total=len(self.cliques)) \
+                if self.verbose > 0 else enumerate(self.cliques):
                 rows = self._get_rows_in_universe(clique.random_variables)
                 clique.fit(x[:,rows])
+                
                 if rescale_weights:
-                    clique.weights *= len([self.cliques])
+                    #number of trainable parameters
+                    notp = sum([p.numel() for p in clique.parameters() if p.requires_grad])
+                    self.cliques_rescalings[idx] = notp/2
                 
             if calc_z:
                 self.calc_z()
@@ -227,32 +233,4 @@ class MarkovNetwork(nn.Module):
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                 )
         return fig
-    
-# class EnergyMarkovNetwork(MarkovNetwork):
-#     def __init__(self, random_variables:List[trv.RandomVariable], cliques:List[List[Union[str, trv.RandomVariable]]],
-#                 factor = EnergyFactor, device:str or int="cuda", max_parallel_worlds:int = pow(2,20),verbose:int=1):
-#         """Construct an Energy Markov Random Field from the nodes and edges where the forward pass uses + as operator and not *.
-
-#         Args:
-#             random_variables (iterable<torch_random_variable.RandomVariable>): The random variables that are represented
-#                 in this Markov Random Field
-#             cliques (iterable<iterable<torch_random_variable.RandomVariable>>): The connectivity of the random variables
-#                 as a list of lists where the inner lists represent all members of a clique
-#             device (str): The device where the Markov Random Field will perform most of its calculations
-#             max_parallel_worlds (int): The maximum number of worlds that are evaluated at once on the graphics card.
-#                 This parameter can produce an Cuda Out of Memory Error when picked too large and slow down speed when picked too small.
-#             verbose (int): Level of verbosity
-
-#         """
-#         super(EnergyMarkovNetwork, self).__init__(random_variables, cliques,
-#                 factor, device, max_parallel_worlds, verbose)
-
-        
-#     def forward_no_z(self, x):
-#         probs = torch.zeros((len(x),), device = self.device, dtype = torch.float)
-#         for clique in self.cliques:
-#             rows = self._get_rows_in_universe(clique.random_variables)
-#             potential = clique(x[:,rows])
-#             probs = probs + potential
-#         return probs
      
