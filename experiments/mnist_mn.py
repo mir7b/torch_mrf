@@ -5,6 +5,7 @@ from torch_mrf.factors.gauss_factor import GaussFactor
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.subplots
+import plotly.figure_factory as ff
     
 
 def mnist():
@@ -44,13 +45,15 @@ def mnist():
     queries = X.repeat_interleave(10,0)
     classes = torch.arange(0,10).repeat(len(X),1).flatten().unsqueeze(-1).long()
     queries = torch.cat((queries, classes), dim=-1)
-    probability = model(queries)
+    probability = model(queries, discriminative=True)
     probability = probability.reshape(len(X),10).cpu().detach()
     prediction = torch.argmax(probability, dim=1).long()
     
-    print(sklearn.metrics.confusion_matrix(y,prediction.numpy()))
+    cm = sklearn.metrics.confusion_matrix(y,prediction.numpy())
     print(sklearn.metrics.accuracy_score(y,prediction.numpy()))
-    
+    fig = model.plot_structure()
+    fig.show()
+    exit()
     missclassifications = prediction != y.squeeze()
     missclassifications = missclassifications.nonzero()
     

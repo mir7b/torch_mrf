@@ -101,16 +101,19 @@ class MarkovNetwork(nn.Module):
         return rows
 
 
-    def forward(self, x):
-        return self.forward_no_z(x) / self.Z
+    def forward(self, x, discriminative=False):
+        return self.forward_no_z(x, discriminative) / self.Z
 
 
-    def forward_no_z(self, x):
+    def forward_no_z(self, x, discriminative=False):
         probs = torch.ones((len(x),), device = self.device, dtype = torch.float)
-        for idx, clique in enumerate(self.cliques):
+        for idx, clique in enumerate(self.cliques) if self.verbose < 1 \
+            else tqdm.tqdm(enumerate(self.cliques), total=len(self.cliques), desc="Calculating factor potentials"):
             rows = self._get_rows_in_universe(clique.random_variables)
             potential = clique(x[:,rows]) * self.cliques_rescalings[idx]
             probs = probs * potential
+            if discriminative:
+                probs = probs/sum(probs)
         return probs
 
 
@@ -196,20 +199,12 @@ class MarkovNetwork(nn.Module):
 
         node_trace = go.Scatter(
             x=node_x, y=node_y,
-            mode='markers',
+            mode='markers+text',
             hoverinfo='text',
+            textposition="top center",
             marker=dict(
-                showscale=True,
-                colorscale='YlGnBu',
-                reversescale=True,
                 color=[],
                 size=10,
-                colorbar=dict(
-                    thickness=15,
-                    title='Node Connections',
-                    xanchor='left',
-                    titleside='right'
-                ),
                 line_width=2))
 
         node_adjacencies = []
@@ -217,20 +212,20 @@ class MarkovNetwork(nn.Module):
         
         for node, adjacencies in enumerate(graph.adjacency()):
             node_adjacencies.append(len(adjacencies[1]))
-            node_text.append("Variable Name: " + str(list(graph.nodes())[node]))
+            node_text.append(str(list(graph.nodes())[node]))
 
-        node_trace.marker.color = node_adjacencies
         node_trace.text = node_text
 
         fig = go.Figure(data=[edge_trace, node_trace],
              layout=go.Layout(
                 title='Structure of Markov Random Field',
-                #titlefont_size=16,
                 showlegend=False,
                 hovermode='closest',
-                #margin=dict(b=20,l=5,r=5,t=40),
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
                 )
+        fig.update_layout(font=dict(size=20))
+        fig.update_coloraxes(showscale=False)
+        fig.update_traces(showlegend=False)
         return fig
      
