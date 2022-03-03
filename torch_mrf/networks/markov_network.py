@@ -1,6 +1,6 @@
 """This file describes vecotrized Markov Random Fields for the GPU."""
 
-from typing import List, Union
+from typing import List, Tuple, Union
 import torch
 import torch.nn as nn
 from torch_mrf import mrf_utils
@@ -82,7 +82,7 @@ class MarkovNetwork(nn.Module):
         
         self.Z = torch.tensor(1, dtype=torch.double)
 
-    def _get_rows_in_universe(self, random_variables:List[trv.RandomVariable]):
+    def _get_rows_in_universe(self, random_variables:List[trv.RandomVariable]) -> torch.Tensor:
         """Get the row indices of the random_variables in the universe.
         
         Args:
@@ -101,12 +101,43 @@ class MarkovNetwork(nn.Module):
         return rows
 
 
-    def forward(self, x, discriminative=False, reshape=None):
+    def forward(self, x, discriminative=False, reshape=None) -> torch.Tensor:
+        """Get the potential of a set of worlds.
+
+        Args:
+            x (torch.Tensor): The set of worlds which potentials need to be calculated
+            discriminative (bool, optional): Rather to normalise the outputs or not.
+                Normalising will set the sum over all worlds that are queried for to 1. 
+                Defaults to False.
+            reshape (tuple or None, optional): If the potentials should be normalized
+            this shape will be applied to the worlds such that they corrospond to mini-universes
+            within the set of worlds. They are then normalized such that every mini-universe
+            has a sum of potentials that is equal to 1. Defaults to None.
+
+        Returns:
+            torch.Tensor: The potential of each world.
+        """
         return self.forward_no_z(x, discriminative, reshape) / self.Z
 
 
-    def forward_no_z(self, x:torch.Tensor, discriminative=False, reshape=None):
+    def forward_no_z(self, x:torch.Tensor, discriminative:bool=False, 
+            reshape: Tuple or None =None) -> torch.Tensor:
+        """Get the potential of a set of worlds without normalising by the overall
+            probability mass.
 
+        Args:
+            x (torch.Tensor): The set of worlds which potentials need to be calculated
+            discriminative (bool, optional): Rather to normalise the outputs or not.
+                Normalising will set the sum over all worlds that are queried for to 1. 
+                Defaults to False.
+            reshape (tuple or None, optional): If the potentials should be normalized
+            this shape will be applied to the worlds such that they corrospond to mini-universes
+            within the set of worlds. They are then normalized such that every mini-universe
+            has a sum of potentials that is equal to 1. Defaults to None.
+
+        Returns:
+            torch.Tensor: The potential of each world.
+        """
 
         probs:torch.Tensor = torch.ones((len(x),), device = self.device, dtype = torch.float)
 
@@ -126,7 +157,16 @@ class MarkovNetwork(nn.Module):
         return probs
 
 
-    def fit(self, x, calc_z=False, rescale_weights=True):
+    def fit(self, x:torch.Tensor, calc_z=False, rescale_weights=True):
+        """Fit the model parameters such that x is generated most likely. 
+
+        Args:
+            x (torch.Tensor): The training data
+            calc_z (bool, optional): Rather to calc z or not. Calculating Z is 
+                only feasable for low dimensional datasets. Defaults to False.
+            rescale_weights (bool, optional): Rather to set scaling constants that
+                allow more stable potentials. Defaults to True.
+        """
         with torch.no_grad():
             for idx, clique in tqdm.tqdm(enumerate(self.cliques), desc="Fitting model parameters", total=len(self.cliques)) \
                 if self.verbose > 0 else enumerate(self.cliques):
@@ -142,7 +182,16 @@ class MarkovNetwork(nn.Module):
                 self.calc_z()
             
     def calc_z(self, set_Z:bool = True):
-        """Calculate the probability mass of this mrf with respect to the current weights."""
+        """Calculate the overall probability mass (Z) that is distributed across
+        all worlds. 
+
+        Args:
+            set_Z (bool, optional): Rather to set Z as class variable or to just
+             calculate Z. Defaults to True.
+
+        Returns:
+            _type_: _description_
+        """
         with torch.no_grad():
             #initialize new Z
             Z = torch.tensor(0, dtype=torch.double, device=self.device)
@@ -164,7 +213,16 @@ class MarkovNetwork(nn.Module):
             return Z
 
     def plot_structure(self, layout = networkx.drawing.layout.spring_layout) -> go.Figure:
-        
+        """Plot the structure of this MRF. 
+
+        Args:
+            layout (_type_, optional): A layout that can be applied to this MRF. 
+                networkx.drawing.layout provides the interface to generate layouts for any graph.
+                Defaults to networkx.drawing.layout.spring_layout.
+
+        Returns:
+            go.Figure: A plotly figure that contains the edge and node trace
+        """
         #generate nodes and edges of the networkx graph
         nodes = set([var.name for var in self.random_variables])
         edges = []
@@ -208,9 +266,9 @@ class MarkovNetwork(nn.Module):
 
         node_trace = go.Scatter(
             x=node_x, y=node_y,
-            mode='markers+text',
+            mode='markers',
             hoverinfo='text',
-            textposition="top center",
+            # textposition="top center",
             marker=dict(
                 color=[],
                 size=10,
@@ -222,7 +280,6 @@ class MarkovNetwork(nn.Module):
         for node, adjacencies in enumerate(graph.adjacency()):
             node_adjacencies.append(len(adjacencies[1]))
             node_text.append(str(list(graph.nodes())[node]))
-
         node_trace.text = node_text
 
         fig = go.Figure(data=[edge_trace, node_trace],

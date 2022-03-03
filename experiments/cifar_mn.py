@@ -58,7 +58,7 @@ with torch.no_grad():
         cm = sklearn.metrics.confusion_matrix(batch[:,-1],prediction.numpy())
         print(cm)
         print(sklearn.metrics.accuracy_score(batch[:,-1],prediction.numpy()))
-
+        model.plot_structure().show()
         # for clique in model.cliques[:10]:
         #     fig = go.Figure(clique.plot())
         #     fig.show()
