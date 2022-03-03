@@ -101,19 +101,28 @@ class MarkovNetwork(nn.Module):
         return rows
 
 
-    def forward(self, x, discriminative=False):
-        return self.forward_no_z(x, discriminative) / self.Z
+    def forward(self, x, discriminative=False, reshape=None):
+        return self.forward_no_z(x, discriminative, reshape) / self.Z
 
 
-    def forward_no_z(self, x, discriminative=False):
-        probs = torch.ones((len(x),), device = self.device, dtype = torch.float)
+    def forward_no_z(self, x:torch.Tensor, discriminative=False, reshape=None):
+
+
+        probs:torch.Tensor = torch.ones((len(x),), device = self.device, dtype = torch.float)
+
         for idx, clique in enumerate(self.cliques) if self.verbose < 1 \
             else tqdm.tqdm(enumerate(self.cliques), total=len(self.cliques), desc="Calculating factor potentials"):
             rows = self._get_rows_in_universe(clique.random_variables)
             potential = clique(x[:,rows]) * self.cliques_rescalings[idx]
             probs = probs * potential
             if discriminative:
-                probs = probs/sum(probs)
+                if reshape:
+                    probs = probs.reshape(*reshape)
+                    probability_masses = probs.sum(-1).unsqueeze(-1)
+                    probs /= probability_masses
+                    probs = probs.flatten()
+                else:
+                    probs = probs/sum(probs)
         return probs
 
 

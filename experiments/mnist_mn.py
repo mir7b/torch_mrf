@@ -21,7 +21,7 @@ def mnist():
     
     X:torch.Tensor = torch.tensor(X)
     original_data = X
-    X = X/3
+    X = X
     X = X.long()
     y = torch.tensor(y).unsqueeze(-1).long()
     
@@ -53,7 +53,7 @@ def mnist():
     print(sklearn.metrics.accuracy_score(y,prediction.numpy()))
     fig = model.plot_structure()
     fig.show()
-    exit()
+
     missclassifications = prediction != y.squeeze()
     missclassifications = missclassifications.nonzero()
     

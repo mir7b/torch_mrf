@@ -1,4 +1,10 @@
 *.vscode
-__pychache__/
+*/__pychache__
 *.pyc
 lightning_logs/
+*/bin/
+*/etc
+*/include
+*/lib
+*/lib64
+*/share
