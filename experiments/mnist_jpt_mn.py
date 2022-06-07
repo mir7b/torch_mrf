@@ -1,7 +1,7 @@
 import torch
 import torch_random_variable.torch_random_variable as trv
 from torch_mrf.networks.markov_network import MarkovNetwork
-from torch_mrf.factors.gauss_factor import GaussFactor
+from torch_mrf.factors.jpt_factor import JPTFactor
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.subplots
@@ -16,12 +16,11 @@ def mnist():
     rvars = []
     for i in range(8):
         for j in range(8):
-            rvars.append(trv.RandomVariable("%s%s" % (i,j), list(range(17))))
+            rvars.append(trv.NumericRandomVariable("%s%s" % (i,j), list(range(17))))
     rvars.append(trv.RandomVariable("Digit", list(range(10))))
     
     X:torch.Tensor = torch.tensor(X)
     original_data = X
-    X = X 
     X = X.long()
     y = torch.tensor(y).unsqueeze(-1).long()
     
@@ -33,23 +32,28 @@ def mnist():
                 cliques.append( clique + ["%s%s" % (i+1,j)])
             if j < 7:
                 cliques.append( clique + ["%s%s" % (i,j+1)])
-            cliques.append(clique)
-
+            #cliques.append(clique)
 
     data = torch.cat((X,y),dim=-1)
-    model = MarkovNetwork(rvars, cliques, device="cpu", verbose=2)
+    model = MarkovNetwork(rvars, cliques, device="cpu", verbose=2, factor=JPTFactor)
     model.fit(data, calc_z=False, rescale_weights=False)
 
+    model.cliques[2].plot_tree().show()
+    exit()
+    model.cliques[0].plot().show()
+    exit()
     prediction = torch.zeros(y.shape)
     
     queries = X.repeat_interleave(10,0)
     classes = torch.arange(0,10).repeat(len(X),1).flatten().unsqueeze(-1).long()
     queries = torch.cat((queries, classes), dim=-1)
-    probability = model(queries, discriminative=True)
+    
+    probability = model(queries, discriminative=True, reshape=(int(len(queries)/10),10))
     probability = probability.reshape(len(X),10).cpu().detach()
     prediction = torch.argmax(probability, dim=1).long()
     
     cm = sklearn.metrics.confusion_matrix(y,prediction.numpy())
+    print(cm)
     print(sklearn.metrics.accuracy_score(y,prediction.numpy()))
     fig = model.plot_structure()
     fig.show()
@@ -59,7 +63,7 @@ def mnist():
     
     if len(missclassifications) == 0:
         exit()
-        
+    exit()
     fig = plotly.subplots.make_subplots(rows=len(missclassifications), cols=2, 
                                         column_titles=["Missclassified Image", "Probility Distribution"],
                                         row_titles= ["True Class: %s" % y[idx].item() for idx in missclassifications],
